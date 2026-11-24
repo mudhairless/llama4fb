@@ -17,8 +17,14 @@ if [ -z "$LLAMA_CPP" ]; then
 fi
 LLAMA_CPP="$(cd "$LLAMA_CPP" && pwd)"
 
-if [ -f "$LLAMA_CPP/build-cuda/bin/libggml-cuda.so" ]; then
+if [ -n "${2:-}" ]; then
+    LLAMA_BUILD="$2"
+elif [ -n "${LLAMA_BUILD_DIR:-}" ]; then
+    LLAMA_BUILD="$LLAMA_BUILD_DIR"
+elif [ -f "$LLAMA_CPP/build-cuda/bin/libggml-cuda.so" ]; then
     LLAMA_BUILD="$LLAMA_CPP/build-cuda/bin"
+elif [ -f "$LLAMA_CPP/build-vulkan/bin/libggml-vulkan.so" ]; then
+    LLAMA_BUILD="$LLAMA_CPP/build-vulkan/bin"
 else
     LLAMA_BUILD="$LLAMA_CPP/build/bin"
 fi

@@ -23,15 +23,22 @@ LLAMA_CPP="$(cd "$LLAMA_CPP" && pwd)"
 
 if [ -n "${2:-}" ]; then
     BUILD="$2"
+elif [ -n "${LLAMA_BUILD_DIR:-}" ]; then
+    BUILD="$LLAMA_BUILD_DIR"
 elif [ -f "$LLAMA_CPP/build-cuda/bin/libggml-cuda.so" ]; then
     BUILD="$LLAMA_CPP/build-cuda/bin"
+elif [ -f "$LLAMA_CPP/build-vulkan/bin/libggml-vulkan.so" ]; then
+    BUILD="$LLAMA_CPP/build-vulkan/bin"
 else
     BUILD="$LLAMA_CPP/build/bin"
 fi
 
 EXTRALIBS=""
 if [ -f "$BUILD/libggml-cuda.so" ]; then
-    EXTRALIBS="-l ggml-cuda"
+    EXTRALIBS="$EXTRALIBS -l ggml-cuda"
+fi
+if [ -f "$BUILD/libggml-vulkan.so" ]; then
+    EXTRALIBS="$EXTRALIBS -l ggml-vulkan"
 fi
 
 fbc -i "$INC_DIR" \
