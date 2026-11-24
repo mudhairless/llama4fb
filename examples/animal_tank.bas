@@ -1519,6 +1519,11 @@ do
             animals(i).active=0
             continue for
         end if
+        ' HP regeneration when fed, watered, and not under attack
+        if animals(i).hunger > 0 and animals(i).thirst > 0 and animals(i).attackedTimer <= 0 and animals(i).hp < 100 then
+            animals(i).hp += dt*0.3
+            if animals(i).hp > 100 then animals(i).hp = 100
+        end if
         ' attacked behavior
         if animals(i).attackedTimer > 0 then
             if animals(i).attacker >= 0 and (animals(i).attacker >= MAX_ANIMALS or animals(animals(i).attacker).active=0) then
