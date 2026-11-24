@@ -234,7 +234,7 @@ sub show_reply(npcName as string, reply as string)
         draw string (70, 565), "Page " & str(page+1) & "/" & str(totalPages) & "  Press any key..."
         screenunlock
         if demoMode = 1 then
-            sleep 500
+            sleep 1500
         else
             while inkey <> "": wend
             sleep
@@ -442,7 +442,10 @@ sub talk_to(idx as integer)
         if idx = 4 and all_clues_asked() = 1 and endingDone = 0 then hasAccuse = 1
         dim totalItems as integer = nVis + hasAccuse
         if totalItems = 0 then totalItems = 1
-        if sel >= totalItems then sel = 0
+        if demoMode = 1 and sel >= totalItems then
+            done = 1
+        end if
+        if demoMode = 0 and sel >= totalItems then sel = 0
 
         screenlock
         line (0, 0)-(799, 599), rgb(50,110,50), bf
@@ -517,7 +520,7 @@ sub talk_to(idx as integer)
                     screenunlock
                     dim tk as string
                     if demoMode = 1 then
-                        sleep 200
+                        sleep 800
                         toneSel = 1
                         tk = chr(13)
                     else
@@ -796,8 +799,11 @@ do
         demoStarted = 1
         for di as integer = 0 to nNpc-1
             talk_to(di)
+            sleep 2000
         next
         show_journal()
+        sleep 3000
+        end
     end if
 
     screenlock
