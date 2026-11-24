@@ -11,7 +11,7 @@ const SC_H = 600
 const WORLD_W = 2600
 const WORLD_H = 1900
 const VISION = 260
-const DECIDE_INTERVAL = 0.75
+const DECIDE_INTERVAL = 2.0
 const MAX_ANIMALS = 80
 const MAX_CORPSES = 100
 
@@ -118,6 +118,19 @@ sub llm_init()
     llama_sampler_chain_add(g_smp, llama_sampler_init_top_k(40))
     llama_sampler_chain_add(g_smp, llama_sampler_init_top_p(0.9, 1))
     llama_sampler_chain_add(g_smp, llama_sampler_init_temp(0.7))
+    llama_sampler_chain_add(g_smp, llama_sampler_init_dist(42))
+end sub
+
+sub rebuild_sampler(temp as single)
+    if g_smp <> 0 then
+        llama_sampler_free(g_smp)
+        g_smp = 0
+    end if
+    dim sparams as llama_sampler_chain_params = llama_sampler_chain_default_params()
+    g_smp = llama_sampler_chain_init(sparams)
+    llama_sampler_chain_add(g_smp, llama_sampler_init_top_k(40))
+    llama_sampler_chain_add(g_smp, llama_sampler_init_top_p(0.9, 1))
+    llama_sampler_chain_add(g_smp, llama_sampler_init_temp(temp))
     llama_sampler_chain_add(g_smp, llama_sampler_init_dist(42))
 end sub
 
@@ -333,6 +346,20 @@ end function
 function is_predator(sp as string) as integer
     if sp="lion" or sp="cheetah" or sp="hyena" then return 1
     return 0
+end function
+
+function species_temp(sp as string) as single
+    select case sp
+        case "elephant": return 0.30
+        case "giraffe": return 0.35
+        case "lion": return 0.40
+        case "wildebeest": return 0.40
+        case "hyena": return 0.45
+        case "zebra": return 0.50
+        case "cheetah": return 0.50
+        case "gazelle": return 0.50
+    end select
+    return 0.40
 end function
 
 function species_size(sp as string) as single
@@ -577,6 +604,7 @@ sub decide_animal(idx as integer)
         "Urgency: if hydration is below 40 you are thirsty and must move toward water before anything else; if fullness is below 40 you are hungry and must seek food/prey before anything else. If hydration is 0 you are dying of thirst; if fullness is 0 you are starving. " & _
         "What do you do? DRINK only if touching water."
 
+    rebuild_sampler(species_temp(animals(idx).species))
     dim reply as string = generate_reply(sysPrompt, usrPrompt)
     dim goalPart as string = ""
     dim actionPart as string = reply
@@ -1582,6 +1610,34 @@ animals(i).hunger -= dt*0.3
             animals(i).y = WORLD_H-20
             if animals(i).vy > 0 then animals(i).vy = 0
         end if
+
+        ' hard-coded flee reflex (no LLM call): near-range predator triggers immediate flee
+        if is_predator(animals(i).species)=0 and animals(i).species <> "elephant" and animals(i).state <> "sleep" then
+            dim _nrBest as single = 99999
+            dim _nrX as single = 0, _nrY as single = 0
+            dim _nrFound as integer = 0
+            for _j as integer = 0 to MAX_ANIMALS-1
+                if animals(_j).active=0 then continue for
+                if not (animals(_j).species="lion" or animals(_j).species="cheetah" or animals(_j).species="hyena") then continue for
+                dim _d as single = dist(animals(i).x, animals(i).y, animals(_j).x, animals(_j).y)
+                if _d < _nrBest then
+                    _nrBest = _d
+                    _nrX = animals(_j).x
+                    _nrY = animals(_j).y
+                    _nrFound = 1
+                end if
+            next
+            if _nrFound=1 and _nrBest < 90 then
+                dim _dx as single = _nrX - animals(i).x
+                dim _dy as single = _nrY - animals(i).y
+                apply_direction(i, dir_from_delta(-_dx, -_dy))
+                animals(i).moveTimer = 0.9
+                animals(i).lastAction = "FLEE"
+                animals(i).actionTime = timer
+                animals(i).goal = "flee"
+                animals(i).lastDecide = timer
+            end if
+        end if
     next
 
     for f as integer = 0 to nFoods-1
@@ -1638,7 +1694,22 @@ animals(i).hunger -= dt*0.3
             end if
         end if
         if animals(i).state = "sleep" then continue for
-            if animals(i).lastDecide = 0 or (timer - animals(i).lastDecide) >= DECIDE_INTERVAL then
+            ' urgent conditions
+            dim _urgent as integer = 0
+            dim _bestPD as single = 99999
+            if animals(i).attackedTimer > 0 then _urgent = 1
+            if is_predator(animals(i).species)=0 then
+                for _j2 as integer = 0 to MAX_ANIMALS-1
+                    if animals(_j2).active=0 then continue for
+                    if not (animals(_j2).species="lion" or animals(_j2).species="cheetah" or animals(_j2).species="hyena") then continue for
+                    dim _dd as single = dist(animals(i).x, animals(i).y, animals(_j2).x, animals(_j2).y)
+                    if _dd < _bestPD then _bestPD = _dd
+                next
+                if _bestPD < 90 then _urgent = 1
+            end if
+            ' skip mid-move unless urgent
+            if animals(i).moveTimer > 0 and _urgent = 0 then continue for
+            if animals(i).lastDecide = 0 or (timer - animals(i).lastDecide) >= DECIDE_INTERVAL or _urgent = 1 then
                 decide_animal(i)
                 decideIdx = (i + 1) mod nAnimals
                 exit for
