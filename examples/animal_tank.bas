@@ -1762,6 +1762,15 @@ animals(i).hunger -= dt*0.3
         end if
     next
 
+    ' corpse sweep: despawn expired (15s) or eaten-out corpses
+    for c as integer = 0 to MAX_CORPSES-1
+        if corpses(c).active = 1 then
+            if timer >= corpses(c).expire or corpses(c).food <= 0 then
+                corpses(c).active = 0
+            end if
+        end if
+    next
+
     ' population floor keeper: top up any species below 2
     if timer - lastFloorCheck >= 3.0 then
         lastFloorCheck = timer
