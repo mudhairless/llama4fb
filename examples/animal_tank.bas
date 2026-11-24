@@ -639,6 +639,15 @@ function need_word(need as string, value as integer) as string
                 case 4: return "exhausted"
                 case else: return "exhausted"
             end select
+        case "health"
+            select case band
+                case 0: return "healthy"
+                case 1: return "a little hurt"
+                case 2: return "hurt"
+                case 3: return "badly hurt"
+                case 4: return "near death"
+                case else: return "near death"
+            end select
     end select
     return ""
 end function
@@ -875,14 +884,14 @@ sub decide_animal(idx as integer)
     if memJoined <> "" then
         recentStr = "Recent events: " & memJoined & ". "
     end if
-    usrPrompt = "State: you are " & need_word("fullness", int(animals(idx).hunger)) & " and " & need_word("hydration", int(animals(idx).thirst)) & "; your energy is " & need_word("energy", int(animals(idx).energy)) & ". (fullness=" & str(int(animals(idx).hunger)) & "/100, hydration=" & str(int(animals(idx).thirst)) & "/100, energy=" & str(int(animals(idx).energy)) & "/100) attacked=" & attackedStr & ", in water=" & iif(inWater=1,"yes","no") & ". " & _
+    usrPrompt = "State: you are " & need_word("fullness", int(animals(idx).hunger)) & " and " & need_word("hydration", int(animals(idx).thirst)) & "; your energy is " & need_word("energy", int(animals(idx).energy)) & " and you are " & need_word("health", int(animals(idx).hp)) & ". (fullness=" & str(int(animals(idx).hunger)) & "/100, hydration=" & str(int(animals(idx).thirst)) & "/100, energy=" & str(int(animals(idx).energy)) & "/100, health=" & str(int(animals(idx).hp)) & "/100) attacked=" & attackedStr & ", in water=" & iif(inWater=1,"yes","no") & ". " & _
         lastResultStr & recentStr & _
         "Current goal: " & curGoal & ". Stick to your current goal until it is done; change goals only if a predator is threatening you, you were attacked, or a need becomes urgent. " & _
         "Touching water: " & iif(touchWater=1,"yes","no") & ". " & _
         "Do not enter the water; drink from the edge. " & _
         "You can see: " & vis & ". " & _
         "Stay in the central area near the watering hole; avoid map edges. " & _
-        "Urgency: if you are thirsty or very thirsty, move toward water before anything else; if you are hungry or very hungry, seek food/prey before anything else. " & _
+        "Urgency: if you are thirsty or very thirsty, move toward water before anything else; if you are hungry or very hungry, seek food/prey before anything else. if you are badly hurt or near death, get away from predators and stay safe; you recover slowly while you are fed, watered, and not being attacked. " & _
         "What do you do? DRINK only if touching water."
 
     rebuild_sampler(species_temp(animals(idx).species))
