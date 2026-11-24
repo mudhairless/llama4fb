@@ -6,6 +6,10 @@
 #include once "fbgfx.bi"
 #include once "llama.bi"
 
+extern "C"
+    declare function llama_sampler_init_penalties(byval n_vocab as long, byval penalty_last_n as long, byval penalty_repeat as single, byval penalty_freq as single, byval penalty_present as single) as llama_sampler ptr
+end extern
+
 const SC_W = 800
 const SC_H = 600
 const WORLD_W = 2600
@@ -115,9 +119,10 @@ sub llm_init()
 
     dim sparams as llama_sampler_chain_params = llama_sampler_chain_default_params()
     g_smp = llama_sampler_chain_init(sparams)
+    llama_sampler_chain_add(g_smp, llama_sampler_init_penalties(llama_vocab_n_tokens(g_vocab), 64, 1.0, 0.0, 1.5))
     llama_sampler_chain_add(g_smp, llama_sampler_init_top_k(40))
     llama_sampler_chain_add(g_smp, llama_sampler_init_top_p(0.9, 1))
-    llama_sampler_chain_add(g_smp, llama_sampler_init_temp(0.7))
+    llama_sampler_chain_add(g_smp, llama_sampler_init_temp(0.12))
     llama_sampler_chain_add(g_smp, llama_sampler_init_dist(42))
 end sub
 
@@ -128,6 +133,7 @@ sub rebuild_sampler(temp as single)
     end if
     dim sparams as llama_sampler_chain_params = llama_sampler_chain_default_params()
     g_smp = llama_sampler_chain_init(sparams)
+    llama_sampler_chain_add(g_smp, llama_sampler_init_penalties(llama_vocab_n_tokens(g_vocab), 64, 1.0, 0.0, 1.5))
     llama_sampler_chain_add(g_smp, llama_sampler_init_top_k(40))
     llama_sampler_chain_add(g_smp, llama_sampler_init_top_p(0.9, 1))
     llama_sampler_chain_add(g_smp, llama_sampler_init_temp(temp))
@@ -350,16 +356,16 @@ end function
 
 function species_temp(sp as string) as single
     select case sp
-        case "elephant": return 0.30
-        case "giraffe": return 0.35
-        case "lion": return 0.40
-        case "wildebeest": return 0.40
-        case "hyena": return 0.45
-        case "zebra": return 0.50
-        case "cheetah": return 0.50
-        case "gazelle": return 0.50
+        case "elephant": return 0.10
+        case "giraffe": return 0.11
+        case "lion": return 0.12
+        case "wildebeest": return 0.12
+        case "hyena": return 0.13
+        case "zebra": return 0.14
+        case "cheetah": return 0.14
+        case "gazelle": return 0.14
     end select
-    return 0.40
+    return 0.12
 end function
 
 function species_size(sp as string) as single
