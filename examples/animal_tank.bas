@@ -61,6 +61,8 @@ type Animal
     hp as single
     attackedTimer as double
     goal as string
+    lastOutcome as string
+    mem(0 to 2) as string
     attacker as integer
     size as single
     col as uinteger
@@ -312,6 +314,10 @@ sub init_world()
         animals(i).attackedTimer = 0
         animals(i).attacker = -1
         animals(i).goal = ""
+        animals(i).lastOutcome = ""
+        animals(i).mem(0) = ""
+        animals(i).mem(1) = ""
+        animals(i).mem(2) = ""
         animals(i).size = sizes(sp)
         animals(i).col = cols(sp)
     next
@@ -444,6 +450,10 @@ sub spawn_animal(sp as string, bx as single, by as single)
     animals(slot).attackedTimer=0
     animals(slot).attacker=-1
     animals(slot).goal=""
+    animals(slot).lastOutcome=""
+    animals(slot).mem(0)=""
+    animals(slot).mem(1)=""
+    animals(slot).mem(2)=""
     animals(slot).size=species_size(sp)
     animals(slot).col=species_color(sp)
 end sub
@@ -703,6 +713,13 @@ sub log_msg(msg as string)
     close #f
 end sub
 
+sub push_event(idx as integer, text as string)
+    if animals(idx).mem(2) = text then return
+    animals(idx).mem(0) = animals(idx).mem(1)
+    animals(idx).mem(1) = animals(idx).mem(2)
+    animals(idx).mem(2) = text
+end sub
+
 sub decide_animal(idx as integer)
     dim dstr as string
     dim sysPrompt as string
@@ -723,14 +740,34 @@ sub decide_animal(idx as integer)
     dim usrPrompt as string
     dim attackedStr as string = "no"
     if animals(idx).attackedTimer > 0 then attackedStr = "yes"
+    dim hadGoal as integer = 0
+    if animals(idx).goal <> "" then hadGoal = 1
+    dim isAttacked as integer = 0
+    if animals(idx).attackedTimer > 0 then isAttacked = 1
     dim curGoal as string = animals(idx).goal
     if curGoal = "" then curGoal = "none"
     dim inWater as integer = 0
     for p as integer = 0 to nPonds-1
         if dist(animals(idx).x, animals(idx).y, ponds(p).x, ponds(p).y) < ponds(p).r then inWater = 1
     next
+    dim lastResultStr as string = ""
+    if animals(idx).lastOutcome <> "" then
+        lastResultStr = "Last result: " & animals(idx).lastOutcome & ". "
+    end if
+    dim memJoined as string = ""
+    for m as integer = 0 to 2
+        if animals(idx).mem(m) <> "" then
+            if memJoined <> "" then memJoined += "; "
+            memJoined += animals(idx).mem(m)
+        end if
+    next
+    dim recentStr as string = ""
+    if memJoined <> "" then
+        recentStr = "Recent events: " & memJoined & ". "
+    end if
     usrPrompt = "State: you are " & need_word("fullness", int(animals(idx).hunger)) & " and " & need_word("hydration", int(animals(idx).thirst)) & "; your energy is " & need_word("energy", int(animals(idx).energy)) & ". (fullness=" & str(int(animals(idx).hunger)) & "/100, hydration=" & str(int(animals(idx).thirst)) & "/100, energy=" & str(int(animals(idx).energy)) & "/100) attacked=" & attackedStr & ", in water=" & iif(inWater=1,"yes","no") & ". " & _
-        "Current goal: " & curGoal & ". " & _
+        lastResultStr & recentStr & _
+        "Current goal: " & curGoal & ". Stick to your current goal until it is done; change goals only if a predator is threatening you, you were attacked, or a need becomes urgent. " & _
         "Touching water: " & iif(touchWater=1,"yes","no") & ". " & _
         "Do not enter the water; drink from the edge. " & _
         "You can see: " & vis & ". " & _
@@ -758,19 +795,23 @@ sub decide_animal(idx as integer)
             goalPart = trim(rest)
         end if
     end if
+    dim explicitGoal as integer = 0
     if goalPart <> "" then
         animals(idx).goal = lcase(goalPart)
+        explicitGoal = 1
     end if
     ' infer goal from action so LLM can change goals by choosing actions
     dim ua as string = ucase(actionPart)
-    if instr(ua, "DRINK") > 0 then
-        animals(idx).goal = "drink"
-    elseif instr(ua, "EAT") > 0 then
-        animals(idx).goal = "eat"
-    elseif instr(ua, "REST") > 0 or instr(ua, "SLEEP") > 0 then
-        animals(idx).goal = "rest"
-    elseif instr(ua, "MATE") > 0 then
-        animals(idx).goal = "mate"
+    if explicitGoal = 0 and (hadGoal = 0 or isAttacked = 1) then
+        if instr(ua, "DRINK") > 0 then
+            animals(idx).goal = "drink"
+        elseif instr(ua, "EAT") > 0 then
+            animals(idx).goal = "eat"
+        elseif instr(ua, "REST") > 0 or instr(ua, "SLEEP") > 0 then
+            animals(idx).goal = "rest"
+        elseif instr(ua, "MATE") > 0 then
+            animals(idx).goal = "mate"
+        end if
     end if
     if animals(idx).goal = "" then
         if animals(idx).thirst < 40 then
@@ -804,6 +845,8 @@ sub decide_animal(idx as integer)
                         corpses(c).food -= 1
                         if corpses(c).food <= 0 then corpses(c).active = 0
                         ate = 1
+                        animals(idx).lastOutcome = "you ate from a corpse"
+                        push_event(idx, "you ate from a corpse")
                         exit for
                     end if
                 end if
@@ -816,6 +859,7 @@ sub decide_animal(idx as integer)
                     if is_predator(animals(j).species)=1 then continue for
                     if dist(animals(idx).x, animals(idx).y, animals(j).x, animals(j).y) < 35 then
                         animals(j).hp -= 25
+                        push_event(j, "you were attacked by a " & animals(idx).species)
                         if animals(j).hp <= 0 then
                             for c as integer = 0 to MAX_CORPSES-1
                                 if corpses(c).active=0 then
@@ -828,6 +872,11 @@ sub decide_animal(idx as integer)
                                 end if
                             next
                             animals(j).active=0
+                            animals(idx).lastOutcome = "you killed a " & animals(j).species & " and ate"
+                            push_event(idx, "you killed a " & animals(j).species & " and ate")
+                        else
+                            animals(idx).lastOutcome = "you attacked a " & animals(j).species
+                            push_event(idx, "you attacked a " & animals(j).species)
                         end if
                         ate=1
                         exit for
@@ -846,6 +895,8 @@ sub decide_animal(idx as integer)
                     foods(f).active = 0
                     foods(f).regen = timer + 8 + rnd*6
                     ate = 1
+                    animals(idx).lastOutcome = "you ate grass"
+                    push_event(idx, "you ate grass")
                     exit for
                 end if
             next
@@ -853,10 +904,17 @@ sub decide_animal(idx as integer)
         if ate then
             animals(idx).state = "eat"
             animals(idx).lastAction = "EAT"
-            animals(idx).goal = ""
+            if animals(idx).goal = "eat" then animals(idx).goal = ""
         else
             animals(idx).state = "idle"
             animals(idx).lastAction = "IDLE"
+            if is_predator(animals(idx).species)=1 then
+                animals(idx).lastOutcome = "you tried to eat, but no prey or corpse was within reach"
+                push_event(idx, "you tried to eat, but no prey or corpse was within reach")
+            else
+                animals(idx).lastOutcome = "you tried to eat, but no grass was within reach"
+                push_event(idx, "you tried to eat, but no grass was within reach")
+            end if
         end if
         animals(idx).vx = 0: animals(idx).vy = 0
         animals(idx).moveTimer = 0.6
@@ -873,10 +931,14 @@ sub decide_animal(idx as integer)
             if animals(idx).thirst > 100 then animals(idx).thirst = 100
             animals(idx).state = "drink"
             animals(idx).lastAction = "DRINK"
-            animals(idx).goal = ""
+            if animals(idx).goal = "drink" then animals(idx).goal = ""
+            animals(idx).lastOutcome = "you drank"
+            push_event(idx, "you drank")
         else
             animals(idx).state = "idle"
             animals(idx).lastAction = "IDLE"
+            animals(idx).lastOutcome = "you tried to drink, but you were not at the water's edge"
+            push_event(idx, "you tried to drink, but you were not at the water's edge")
         end if
         animals(idx).vx = 0: animals(idx).vy = 0
         animals(idx).moveTimer = 0.6
@@ -898,13 +960,19 @@ sub decide_animal(idx as integer)
         end if
         if mated then
             animals(idx).state = "mate"
+            animals(idx).lastOutcome = "you mated and a baby " & animals(idx).species & " was born"
+            push_event(idx, "you mated and a baby " & animals(idx).species & " was born")
+            if animals(idx).goal = "mate" then animals(idx).goal = ""
         else
             animals(idx).state = "idle"
+            animals(idx).lastOutcome = "you tried to mate, but it did not happen"
+            push_event(idx, "you tried to mate, but it did not happen")
         end if
         animals(idx).vx = 0: animals(idx).vy = 0
         animals(idx).moveTimer = 0.6
     elseif instr(u,"REST") > 0 then
         animals(idx).state = "rest"
+        animals(idx).lastOutcome = "you rested"
         animals(idx).vx = 0: animals(idx).vy = 0
         animals(idx).moveTimer = 1.5
     else
@@ -1640,6 +1708,7 @@ animals(i).hunger -= dt*0.3
                             animals(j).hp -= dt*20
                         animals(j).attackedTimer = 1.2
                         animals(j).attacker = i
+                        push_event(j, "you were attacked by a " & animals(i).species)
                             if animals(j).hp <= 0 then
                                 for c as integer = 0 to MAX_CORPSES-1
                                     if corpses(c).active=0 then
@@ -1737,6 +1806,7 @@ animals(i).hunger -= dt*0.3
         if is_predator(animals(i).species)=0 and animals(i).species <> "elephant" and animals(i).state <> "sleep" then
             dim _nrBest as single = 99999
             dim _nrX as single = 0, _nrY as single = 0
+            dim _nrSpecies as string = ""
             dim _nrFound as integer = 0
             for _j as integer = 0 to MAX_ANIMALS-1
                 if animals(_j).active=0 then continue for
@@ -1746,6 +1816,7 @@ animals(i).hunger -= dt*0.3
                     _nrBest = _d
                     _nrX = animals(_j).x
                     _nrY = animals(_j).y
+                    _nrSpecies = animals(_j).species
                     _nrFound = 1
                 end if
             next
@@ -1758,6 +1829,7 @@ animals(i).hunger -= dt*0.3
                 animals(i).actionTime = timer
                 animals(i).goal = "flee"
                 animals(i).lastDecide = timer
+                push_event(i, "you fled from a " & _nrSpecies)
             end if
         end if
     next
