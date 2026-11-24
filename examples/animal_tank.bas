@@ -1025,7 +1025,7 @@ sub decide_animal(idx as integer)
                 for j as integer = 0 to MAX_ANIMALS-1
                     if j=idx then continue for
                     if animals(j).active=0 then continue for
-                    if is_predator(animals(j).species)=1 then continue for
+                    if animals(idx).species <> "crocodile" and is_predator(animals(j).species)=1 then continue for
                     if dist(animals(idx).x, animals(idx).y, animals(j).x, animals(j).y) < 35 then
                         animals(j).hp -= 25 * damage_mult(animals(j).species)
                         push_event(j, "you were attacked by a " & animals(idx).species)
@@ -1732,7 +1732,7 @@ do
             if is_predator(animals(i).species)=1 and animals(i).hunger < 40 then
                 for j as integer = 0 to MAX_ANIMALS-1
                     if animals(j).active=0 then continue for
-                    if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile" then continue for
+                    if animals(i).species <> "crocodile" and (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile") then continue for
                     if dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y) < VISION*0.7 then
                         animals(i).moveTimer = 0
                         animals(i).vx = 0
@@ -1754,7 +1754,7 @@ do
                 dim tx as single = 0, ty as single = 0
                 for j as integer = 0 to MAX_ANIMALS-1
                     if animals(j).active=0 then continue for
-                    if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile" then continue for
+                    if animals(i).species <> "crocodile" and (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile") then continue for
                     dim d as single = dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y)
                     if d < bestD and d < VISION*1.5 then
                         bestD = d
@@ -1840,7 +1840,7 @@ do
                         dim tx as single = 0, ty as single = 0
                         for j as integer = 0 to MAX_ANIMALS-1
                             if animals(j).active=0 then continue for
-                            if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile" then continue for
+                            if animals(i).species <> "crocodile" and (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile") then continue for
                             dim d as single = dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y)
                             if d < bestD then
                                 bestD = d
@@ -1913,7 +1913,7 @@ do
                 if animals(i).hunger < 50 then
                     for j as integer = 0 to MAX_ANIMALS-1
                         if animals(j).active=0 then continue for
-                        if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile" then continue for
+                        if animals(i).species <> "crocodile" and (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile") then continue for
                         if dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y) < 32 then
                             animals(j).hp -= dt*20 * damage_mult(animals(j).species)
                         animals(j).attackedTimer = 1.2
