@@ -1315,11 +1315,11 @@ animals(i).hunger -= dt*0.3
                     animals(i).y += (by - animals(i).y) * 0.0015
                 end if
             end if
-            ' emergency override: if predator/prey very close, stop and let flee/chase handle next frame
-            if is_predator(animals(i).species)=0 then
+            ' emergency override: hungry predator stops when prey very close, so EAT can land
+            if is_predator(animals(i).species)=1 and animals(i).hunger < 40 then
                 for j as integer = 0 to MAX_ANIMALS-1
                     if animals(j).active=0 then continue for
-                    if not (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena") then continue for
+                    if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" then continue for
                     if dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y) < VISION*0.7 then
                         animals(i).moveTimer = 0
                         animals(i).vx = 0
@@ -1327,19 +1327,6 @@ animals(i).hunger -= dt*0.3
                         exit for
                     end if
                 next
-            else
-                if animals(i).hunger < 40 then
-                    for j as integer = 0 to MAX_ANIMALS-1
-                        if animals(j).active=0 then continue for
-                        if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" then continue for
-                        if dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y) < VISION*0.7 then
-                            animals(i).moveTimer = 0
-                            animals(i).vx = 0
-                            animals(i).vy = 0
-                            exit for
-                        end if
-                    next
-                end if
             end if
             if animals(i).moveTimer <= 0 then
                 animals(i).vx = 0
@@ -1709,7 +1696,7 @@ animals(i).hunger -= dt*0.3
             end if
             ' skip mid-move unless urgent
             if animals(i).moveTimer > 0 and _urgent = 0 then continue for
-            if animals(i).lastDecide = 0 or (timer - animals(i).lastDecide) >= DECIDE_INTERVAL or _urgent = 1 then
+            if animals(i).lastDecide = 0 or (timer - animals(i).lastDecide) >= DECIDE_INTERVAL then
                 decide_animal(i)
                 decideIdx = (i + 1) mod nAnimals
                 exit for
