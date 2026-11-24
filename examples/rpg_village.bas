@@ -518,7 +518,7 @@ sub talk_to(idx as integer)
                     dim tk as string
                     if demoMode = 1 then
                         sleep 200
-                        toneSel = demoAskCount mod 5
+                        toneSel = 1
                         tk = chr(13)
                     else
                         tk = inkey
@@ -690,7 +690,7 @@ sub talk_to(idx as integer)
                     ecount -= 1
                 loop
                 npcs(idx).history = newHistory
-                if demoMode = 1 then sel += 1
+                if demoMode = 1 then sel = totalItems
                 log_msg("NPC=" & npcs(idx).nombre & " TOPIC=" & topic & " TONE=" & toneWord & " DISPOSITION=" & str(npcs(idx).disposition) & " HISTORY=" & npcs(idx).history)
 
                 screenlock
