@@ -44,6 +44,8 @@ end type
 type Animal
     active as integer
     species as string
+    name as string
+    trait as string
     x as single
     y as single
     vx as single
@@ -247,6 +249,8 @@ function dist(ax as single, ay as single, bx as single, by as single) as single
     return sqr((ax-bx)^2 + (ay-by)^2)
 end function
 
+declare sub assign_identity(slot as integer)
+
 sub init_world()
     ' one large watering hole
     ponds(0).x=WORLD_W/2: ponds(0).y=WORLD_H/2: ponds(0).r=200
@@ -320,6 +324,7 @@ sub init_world()
         animals(i).mem(2) = ""
         animals(i).size = sizes(sp)
         animals(i).col = cols(sp)
+        assign_identity(i)
     next
     nAnimals = 14
     for i as integer = 0 to MAX_CORPSES-1
@@ -340,6 +345,102 @@ function species_behavior(sp as string) as string
     end select
     return "You are an animal."
 end function
+
+function trait_sentence(trait as string) as string
+    select case lcase(trim(trait))
+    case "bold": return "You are bold. You act fast, take risks, and rarely hesitate."
+    case "cautious": return "You are cautious. You keep your distance from danger and think before you act."
+    case "lazy": return "You are lazy. You prefer resting and staying put unless a need is pressing."
+    case "curious": return "You are curious. You like wandering and investigating what you see."
+    case "greedy": return "You are greedy. You eat whenever you get the chance, even when you are not very hungry."
+    case "restless": return "You are restless. You dislike staying still and move often."
+    case "calm": return "You are calm. You are slow to panic and steady in your habits."
+    case "social": return "You are social. You prefer to stay close to others of your kind."
+    end select
+    return ""
+end function
+
+function species_name_pool_str(sp as string) as string
+    select case sp
+    case "lion": return "Simba|Nala|Mufasa|Zuri|Kito|Asha|Jengo|Sarabi|Kofi|Tamasha|Jabari|Amara|Nia|Sefu|Kesi|Zola|Dakarai|Eshe|Jelani|Kamaria|Odion|Safara|Taji|Zalika"
+    case "cheetah": return "Dash|Zola|Kip|Sefu|Amara|Jengo|Nia|Tamba|Zane|Kesi|Asha|Jabari|Kofi|Zuri|Eshe|Jelani|Kamaria|Odion|Safara|Taji|Zalika|Dakarai|Bibi|Kito"
+    case "hyena": return "Shenzi|Banzai|Ed|Kamaria|Jabari|Nia|Tamba|Zola|Kito|Asha|Sefu|Kesi|Zuri|Amara|Jengo|Kofi|Eshe|Jelani|Odion|Safara|Taji|Zalika|Dakarai|Bibi"
+    case "gazelle": return "Zara|Kito|Nia|Sefu|Amara|Jengo|Kesi|Tamba|Zuri|Bibi|Asha|Zola|Jabari|Kofi|Eshe|Jelani|Kamaria|Odion|Safara|Taji|Zalika|Dakarai|Lulu|Penda"
+    case "zebra": return "Zane|Zola|Kito|Nia|Stripes|Tamba|Asha|Jengo|Kesi|Sefu|Zuri|Amara|Jabari|Kofi|Bibi|Eshe|Jelani|Kamaria|Odion|Safara|Taji|Zalika|Dakarai|Penda"
+    case "wildebeest": return "Gnu|Kofi|Tamba|Zuri|Jengo|Nia|Bibi|Sefu|Asha|Kito|Amara|Zola|Jabari|Kesi|Eshe|Jelani|Kamaria|Odion|Safara|Taji|Zalika|Dakarai|Penda|Bomani"
+    case "elephant": return "Tembo|Nia|Jengo|Zuri|Kofi|Asha|Bibi|Tamba|Sefu|Kesi|Amara|Jabari|Zola|Kito|Eshe|Jelani|Kamaria|Odion|Safara|Taji|Zalika|Dakarai|Penda|Bomani"
+    case "giraffe": return "Twiga|Zuri|Kito|Nia|Jengo|Asha|Tamba|Kesi|Sefu|Bibi|Amara|Zola|Jabari|Kofi|Eshe|Jelani|Kamaria|Odion|Safara|Taji|Zalika|Dakarai|Penda|Lulu"
+    end select
+    return ""
+end function
+
+sub assign_identity(slot as integer)
+    dim sp as string = animals(slot).species
+    ' trait
+    dim traitKeys(0 to 7) as string = {"bold","cautious","lazy","curious","greedy","restless","calm","social"}
+    animals(slot).trait = traitKeys(int(rnd*8))
+    ' name pool
+    dim poolStr as string = species_name_pool_str(sp)
+    dim pool(0 to 31) as string
+    dim nPool as integer = 0
+    dim cur as string = ""
+    for k as integer = 1 to len(poolStr)
+        dim ch as string = mid(poolStr, k, 1)
+        if ch = "|" then
+            pool(nPool) = cur
+            nPool += 1
+            cur = ""
+        else
+            cur += ch
+        end if
+    next
+    if cur <> "" then
+        pool(nPool) = cur
+        nPool += 1
+    end if
+    ' check used names among living same species (excluding slot)
+    dim used(0 to MAX_ANIMALS-1) as string
+    dim nUsed as integer = 0
+    for j as integer = 0 to MAX_ANIMALS-1
+        if j = slot then continue for
+        if animals(j).active = 1 and animals(j).species = sp then
+            used(nUsed) = animals(j).name
+            nUsed += 1
+        end if
+    next
+    ' find first unused pool name
+    dim chosen as string = ""
+    for p as integer = 0 to nPool-1
+        dim inUse as integer = 0
+        for u as integer = 0 to nUsed-1
+            if used(u) = pool(p) then inUse = 1
+        next
+        if inUse = 0 then
+            chosen = pool(p)
+            exit for
+        end if
+    next
+    if chosen = "" then
+        ' suffix fallback
+        dim baseName as string = pool(int(rnd*nPool))
+        dim suffix as integer = 2
+        do
+            chosen = baseName & " " & str(suffix)
+            dim inUse2 as integer = 0
+            for u as integer = 0 to nUsed-1
+                if used(u) = chosen then inUse2 = 1
+            next
+            ' also check against animals directly for safety
+            for j as integer = 0 to MAX_ANIMALS-1
+                if j = slot then continue for
+                if animals(j).active = 1 and animals(j).species = sp and animals(j).name = chosen then inUse2 = 1
+            next
+            if inUse2 = 0 then exit do
+            suffix += 1
+        loop
+    end if
+    animals(slot).name = chosen
+end sub
 
 function species_cap(sp as string) as integer
     select case sp
@@ -456,6 +557,7 @@ sub spawn_animal(sp as string, bx as single, by as single)
     animals(slot).mem(2)=""
     animals(slot).size=species_size(sp)
     animals(slot).col=species_color(sp)
+    assign_identity(slot)
 end sub
 
 function dir_from_delta(dx as single, dy as single) as string
@@ -723,7 +825,10 @@ end sub
 sub decide_animal(idx as integer)
     dim dstr as string
     dim sysPrompt as string
-    sysPrompt = species_behavior(animals(idx).species) & " " & _
+    dim traitSent as string = trait_sentence(animals(idx).trait)
+    dim nameInsert as string = " Your name is " & animals(idx).name & "."
+    if traitSent <> "" then nameInsert &= " " & traitSent
+    sysPrompt = species_behavior(animals(idx).species) & nameInsert & " " & _
         "You must choose exactly one action. Allowed actions: " & _
         "MOVE <dir> where dir is N,S,E,W,NE,NW,SE,SW (move that direction), " & _
         "EAT (eat: predators kill nearby prey; herbivores eat grass), " & _
@@ -1013,7 +1118,7 @@ sub decide_animal(idx as integer)
         apply_direction(idx, dstr)
     end if
 
-    log_msg("DECIDE " & animals(idx).species & " idx=" & str(idx) & " pos=" & str(int(animals(idx).x)) & "," & str(int(animals(idx).y)) & chr(10) & _
+    log_msg("DECIDE " & animals(idx).name & " (" & animals(idx).species & ") idx=" & str(idx) & " pos=" & str(int(animals(idx).x)) & "," & str(int(animals(idx).y)) & chr(10) & _
            "SYS: " & sysPrompt & chr(10) & _
            "USR: " & usrPrompt & chr(10) & _
            "GOAL: " & animals(idx).goal & chr(10) & _
@@ -1962,17 +2067,18 @@ animals(i).hunger -= dt*0.3
     ' overlay for selected animal
     if selectedAnimal >= 0 and animals(selectedAnimal).active=1 then
         dim a as Animal = animals(selectedAnimal)
-        line (SC_W-230, 30)-(SC_W-10, 200), rgb(20,20,30), bf
-        line (SC_W-230, 30)-(SC_W-10, 200), rgb(200,200,200), b
-        draw string (SC_W-220, 40), "Selected: " & a.species
+        line (SC_W-230, 30)-(SC_W-10, 215), rgb(20,20,30), bf
+        line (SC_W-230, 30)-(SC_W-10, 215), rgb(200,200,200), b
+        draw string (SC_W-220, 40), "Selected: " & a.name & " the " & a.species
         draw string (SC_W-220, 58), "Fullness: " & str(int(a.hunger)) & "/100"
         draw string (SC_W-220, 76), "Hydration: " & str(int(a.thirst)) & "/100"
         draw string (SC_W-220, 94), "Energy: " & str(int(a.energy)) & "/100"
         draw string (SC_W-220, 112), "HP: " & str(int(a.hp)) & "/100"
         draw string (SC_W-220, 130), "Goal: " & a.goal
-        draw string (SC_W-220, 148), "State: " & a.state
-        draw string (SC_W-220, 166), "Thought: " & left(a.lastAction, 24)
-        draw string (SC_W-220, 184), "Click empty to deselect"
+        draw string (SC_W-220, 148), "Trait: " & a.trait
+        draw string (SC_W-220, 166), "State: " & a.state
+        draw string (SC_W-220, 184), "Thought: " & left(a.lastAction, 24)
+        draw string (SC_W-220, 202), "Click empty to deselect"
     end if
     sleep 16
 loop until multikey(FB.SC_Q)
