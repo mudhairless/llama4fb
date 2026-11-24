@@ -2,6 +2,7 @@
 examples/rpg_village
 examples/animal_tank
 examples/hello_llama
+examples/grammar_forge
 examples/*.mp4
 examples/debug_cmd.txt
 examples/*.log
