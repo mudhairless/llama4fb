@@ -473,32 +473,132 @@ function dist_desc(d as single) as string
     return "very far"
 end function
 
+function need_word(need as string, value as integer) as string
+    dim band as integer
+    if value >= 80 then
+        band = 0
+    elseif value >= 60 then
+        band = 1
+    elseif value >= 40 then
+        band = 2
+    elseif value >= 20 then
+        band = 3
+    elseif value >= 1 then
+        band = 4
+    else
+        band = 5
+    end if
+    select case need
+        case "fullness"
+            select case band
+                case 0: return "well fed"
+                case 1: return "satisfied"
+                case 2: return "peckish"
+                case 3: return "hungry"
+                case 4: return "very hungry"
+                case else: return "starving"
+            end select
+        case "hydration"
+            select case band
+                case 0: return "well hydrated"
+                case 1: return "hydrated"
+                case 2: return "a bit thirsty"
+                case 3: return "thirsty"
+                case 4: return "very thirsty"
+                case else: return "dying of thirst"
+            end select
+        case "energy"
+            select case band
+                case 0: return "energetic"
+                case 1: return "steady"
+                case 2: return "tiring"
+                case 3: return "tired"
+                case 4: return "exhausted"
+                case else: return "exhausted"
+            end select
+    end select
+    return ""
+end function
+
 function build_vision(idx as integer) as string
-    dim s as string = ""
-    dim herd as integer = 0
+    dim viewerPred as integer = is_predator(animals(idx).species)
+    dim isPreyViewer as integer = iif(viewerPred = 1, 0, 1)
+
+    ' collect candidates within VISION
+    dim maxC as integer = 256
+    dim candD(0 to 255) as single
+    dim candE(0 to 255) as string
+    dim candT(0 to 255) as integer
+    dim nCand as integer = 0
+
     for j as integer = 0 to nAnimals-1
         if j = idx then continue for
+        if animals(j).active = 0 then continue for
         dim d as single = dist(animals(idx).x, animals(idx).y, animals(j).x, animals(j).y)
-        if d <= VISION then
-            if animals(j).species = animals(idx).species then herd += 1
-            dim dx as integer = int(animals(j).x - animals(idx).x)
-            dim dy as integer = int(animals(j).y - animals(idx).y)
-            if s <> "" then s += " "
-            s += animals(j).species & " " & dir_name(dx, dy) & " " & dist_desc(d)
+        if d > VISION then continue for
+        dim threat as integer = 0
+        if isPreyViewer = 1 and is_predator(animals(j).species) = 1 then threat = 1
+        dim dx as integer = int(animals(j).x - animals(idx).x)
+        dim dy as integer = int(animals(j).y - animals(idx).y)
+        dim entry as string
+        if threat = 1 then
+            entry = "THREAT " & animals(j).species & " " & dir_name(dx, dy) & " " & dist_desc(d)
+        else
+            entry = animals(j).species & " " & dir_name(dx, dy) & " " & dist_desc(d)
         end if
+        candD(nCand) = d
+        candE(nCand) = entry
+        candT(nCand) = threat
+        nCand += 1
     next
-    if is_predator(animals(idx).species)=0 then
-    for f as integer = 0 to nFoods-1
-        if foods(f).active = 0 then continue for
-        dim d as single = dist(animals(idx).x, animals(idx).y, foods(f).x, foods(f).y)
-        if d <= VISION then
+
+    if isPreyViewer = 1 then
+        for f as integer = 0 to nFoods-1
+            if foods(f).active = 0 then continue for
+            dim d as single = dist(animals(idx).x, animals(idx).y, foods(f).x, foods(f).y)
+            if d > VISION then continue for
             dim dx as integer = int(foods(f).x - animals(idx).x)
             dim dy as integer = int(foods(f).y - animals(idx).y)
-            if s <> "" then s += " "
-            s += "food " & dir_name(dx, dy) & " " & dist_desc(d)
-        end if
-    next
+            dim entry as string = "food " & dir_name(dx, dy) & " " & dist_desc(d)
+            candD(nCand) = d
+            candE(nCand) = entry
+            candT(nCand) = 0
+            nCand += 1
+        next
     end if
+
+    ' sort: threats first, then others; each group by distance asc
+    for a as integer = 0 to nCand - 2
+        for b as integer = a + 1 to nCand - 1
+            dim doSwap as integer = 0
+            if candT(b) > candT(a) then
+                doSwap = 1
+            elseif candT(b) = candT(a) and candD(b) < candD(a) then
+                doSwap = 1
+            end if
+            if doSwap = 1 then
+                dim tmpD as single = candD(a)
+                candD(a) = candD(b)
+                candD(b) = tmpD
+                dim tmpE as string = candE(a)
+                candE(a) = candE(b)
+                candE(b) = tmpE
+                dim tmpT as integer = candT(a)
+                candT(a) = candT(b)
+                candT(b) = tmpT
+            end if
+        next
+    next
+
+    ' cap at 6
+    if nCand > 6 then nCand = 6
+
+    dim s as string = ""
+    for i as integer = 0 to nCand - 1
+        if s <> "" then s += "; "
+        s += candE(i)
+    next
+
     ' water: always show nearest watering hole
     dim bestP as integer = 0
     dim bestPD as single = 99999
@@ -514,12 +614,40 @@ function build_vision(idx as integer) as string
         dim d as single = dist(animals(idx).x, animals(idx).y, ponds(p).x, ponds(p).y)
         dim dx as integer = int(ponds(p).x - animals(idx).x)
         dim dy as integer = int(ponds(p).y - animals(idx).y)
-        if s <> "" then s += " "
-        s += "water " & dir_name(dx, dy) & " " & dist_desc(d)
+        dim waterStr as string = "water " & dir_name(dx, dy) & " " & dist_desc(d)
+        if s <> "" then
+            s = s & "; " & waterStr
+        else
+            s = waterStr
+        end if
     next
-    if herd > 0 then
-        s = s & " | herd nearby=" & str(herd)
+
+    ' herd for non-predator viewers
+    if isPreyViewer = 1 then
+        dim sumX as single = 0
+        dim sumY as single = 0
+        dim cnt as integer = 0
+        for j as integer = 0 to nAnimals-1
+            if j = idx then continue for
+            if animals(j).active = 0 then continue for
+            if animals(j).species <> animals(idx).species then continue for
+            dim d as single = dist(animals(idx).x, animals(idx).y, animals(j).x, animals(j).y)
+            if d <= VISION then
+                sumX += animals(j).x
+                sumY += animals(j).y
+                cnt += 1
+            end if
+        next
+        if cnt >= 1 then
+            dim cx as single = sumX / cnt
+            dim cy as single = sumY / cnt
+            dim dx as single = cx - animals(idx).x
+            dim dy as single = cy - animals(idx).y
+            dim hdir as string = dir_name(dx, dy)
+            s = s & " | herd " & hdir
+        end if
     end if
+
     if s = "" then s = "nothing nearby"
     return s
 end function
@@ -595,13 +723,13 @@ sub decide_animal(idx as integer)
     for p as integer = 0 to nPonds-1
         if dist(animals(idx).x, animals(idx).y, ponds(p).x, ponds(p).y) < ponds(p).r then inWater = 1
     next
-    usrPrompt = "State: fullness=" & str(int(animals(idx).hunger)) & "/100, hydration=" & str(int(animals(idx).thirst)) & "/100, energy=" & str(int(animals(idx).energy)) & "/100, attacked=" & attackedStr & ", in water=" & iif(inWater=1,"yes","no") & ". " & _
+    usrPrompt = "State: you are " & need_word("fullness", int(animals(idx).hunger)) & " and " & need_word("hydration", int(animals(idx).thirst)) & "; your energy is " & need_word("energy", int(animals(idx).energy)) & ". (fullness=" & str(int(animals(idx).hunger)) & "/100, hydration=" & str(int(animals(idx).thirst)) & "/100, energy=" & str(int(animals(idx).energy)) & "/100) attacked=" & attackedStr & ", in water=" & iif(inWater=1,"yes","no") & ". " & _
         "Current goal: " & curGoal & ". " & _
         "Touching water: " & iif(touchWater=1,"yes","no") & ". " & _
         "Do not enter the water; drink from the edge. " & _
         "You can see: " & vis & ". " & _
         "Stay in the central area near the watering hole; avoid map edges. " & _
-        "Urgency: if hydration is below 40 you are thirsty and must move toward water before anything else; if fullness is below 40 you are hungry and must seek food/prey before anything else. If hydration is 0 you are dying of thirst; if fullness is 0 you are starving. " & _
+        "Urgency: if you are thirsty or very thirsty, move toward water before anything else; if you are hungry or very hungry, seek food/prey before anything else. " & _
         "What do you do? DRINK only if touching water."
 
     rebuild_sampler(species_temp(animals(idx).species))
