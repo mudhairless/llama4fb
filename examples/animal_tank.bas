@@ -345,7 +345,7 @@ function species_behavior(sp as string) as string
         case "wildebeest": return "You are a wildebeest. You graze in dense herds and move toward water together. You avoid predators and stay with the group."
         case "elephant": return "You are an elephant. You drink deeply at the watering hole and eat plants. You are large and mostly unthreatened; others give you space."
         case "giraffe": return "You are a giraffe. You eat leaves from tall trees and drink carefully at water. You are calm and gentle."
-        case "crocodile": return "You are a crocodile, an ambush predator of the watering hole. You live in the water and almost never leave it. You float quietly near the edge and snap at animals that come close to drink. You do not chase prey across the land; you are slow on land and quick in the water. You always return to the water. You fear nothing in the tank."
+        case "crocodile": return "You are a crocodile, an ambush predator of the watering hole. You live in the water and almost never leave it. You float quietly near the edge and snap at animals that come close to drink. You do not chase prey across the land; you are slow on land and quick in the water. You always return to the water. You are sluggish and rest for most of your actions, staying still unless food or a threat demands movement. You fear nothing in the tank."
     end select
     return "You are an animal."
 end function
@@ -844,7 +844,7 @@ sub apply_direction(idx as integer, d as string)
         case "giraffe": sp = 50
         case "crocodile"
             if dist(animals(idx).x, animals(idx).y, ponds(0).x, ponds(0).y) < ponds(0).r then
-                sp = 100
+                sp = 60
             else
                 sp = 30
             end if
@@ -939,6 +939,7 @@ sub decide_animal(idx as integer)
         "Touching water: " & iif(touchWater=1,"yes","no") & ". " & _
         waterSentence & _
         iif(animals(idx).species = "crocodile" and inWater = 1, "You are hidden in the water; prey cannot see you. ", "") & _
+        iif(animals(idx).species = "crocodile" and inWater = 0, "You are out of the water; return to the water now. ", "") & _
         "You can see: " & vis & ". " & _
         "Stay in the central area near the watering hole; avoid map edges. " & _
         "Urgency: if you are thirsty or very thirsty, move toward water before anything else; if you are hungry or very hungry, seek food/prey before anything else. if you are badly hurt or near death, get away from predators and stay safe; you recover slowly while you are fed, watered, and not being attacked. " & _
@@ -1995,12 +1996,22 @@ do
             next
         end if
 
-        ' crocodile leash: return to pond if it wanders too far
+        ' crocodile leash: return to pond if beyond r + 15 from center
         if animals(i).species = "crocodile" and animals(i).state <> "sleep" then
-            if dist(animals(i).x, animals(i).y, ponds(0).x, ponds(0).y) > ponds(0).r + 60 then
+            if dist(animals(i).x, animals(i).y, ponds(0).x, ponds(0).y) > ponds(0).r + 15 then
                 dim _ldx as single = ponds(0).x - animals(i).x
                 dim _ldy as single = ponds(0).y - animals(i).y
                 apply_direction(i, dir_from_delta(_ldx, _ldy))
+                animals(i).moveTimer = 0.5
+            end if
+        end if
+
+        ' crocodile: never stay on land; pull back into the water
+        if animals(i).species = "crocodile" and animals(i).state <> "sleep" then
+            if dist(animals(i).x, animals(i).y, ponds(0).x, ponds(0).y) > ponds(0).r then
+                dim _pdx as single = ponds(0).x - animals(i).x
+                dim _pdy as single = ponds(0).y - animals(i).y
+                apply_direction(i, dir_from_delta(_pdx, _pdy))
                 animals(i).moveTimer = 0.5
             end if
         end if
