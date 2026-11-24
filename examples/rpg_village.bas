@@ -5,6 +5,10 @@
 #include once "fbgfx.bi"
 #include once "llama.bi"
 
+extern "C"
+    declare function llama_sampler_init_penalties(byval n_vocab as long, byval penalty_last_n as long, byval penalty_repeat as single, byval penalty_freq as single, byval penalty_present as single) as llama_sampler ptr
+end extern
+
 const SC_W = 800
 const SC_H = 600
 
@@ -65,9 +69,10 @@ sub llm_init()
 
     dim sparams as llama_sampler_chain_params = llama_sampler_chain_default_params()
     g_smp = llama_sampler_chain_init(sparams)
+    llama_sampler_chain_add(g_smp, llama_sampler_init_penalties(llama_vocab_n_tokens(g_vocab), 64, 1.0, 0.0, 1.5))
     llama_sampler_chain_add(g_smp, llama_sampler_init_top_k(40))
     llama_sampler_chain_add(g_smp, llama_sampler_init_top_p(0.9, 1))
-    llama_sampler_chain_add(g_smp, llama_sampler_init_temp(0.7))
+    llama_sampler_chain_add(g_smp, llama_sampler_init_temp(0.4))
     llama_sampler_chain_add(g_smp, llama_sampler_init_dist(42))
 end sub
 
@@ -78,7 +83,7 @@ function generate_reply(sysPrompt as string, usrPrompt as string, history as str
     ' Build ChatML prompt manually with thinking disabled.
     dim fullSys as string = sysPrompt
     if history <> "" then
-        fullSys = fullSys & chr(10) & "Earlier the player asked you about: " & history & "."
+        fullSys = fullSys & chr(10) & "Your memory of earlier conversations with this player: " & history
     end if
     if askCount > 1 then
         fullSys = fullSys & chr(10) & "The player has asked this same topic " & str(askCount) & " times. If you were holding something back, reveal a little more now; otherwise you may become slightly annoyed at repeating yourself, but stay in character."
@@ -316,7 +321,7 @@ sub talk_to(idx as integer)
     wend
     while inkey <> "": wend
     ' greeting
-    dim greet as string = generate_reply(npcs(idx).persona, "Greet the player in character, speaking naturally as a real person would, one or two sentences. Avoid robotic or formulaic phrases.", npcs(idx).history, 0)
+    dim greet as string = generate_reply(npcs(idx).persona, "Greet the player in character, speaking naturally as a real person would, one or two sentences. Avoid robotic or formulaic phrases. If you have a memory of this player, greet them like someone you have spoken with before.", npcs(idx).history, 0)
     show_reply npcs(idx).nombre, greet
     dim sel as integer = 0
     dim done as integer = 0
@@ -369,9 +374,10 @@ sub talk_to(idx as integer)
             line (0, 390)-(799, 599), rgb(20,20,30), bf
             draw string (70, 450), npcs(idx).nombre & " is thinking..."
             screenunlock
-            dim usrPrompt as string = "The player asks about: " & topic & ". Reply in character, speaking naturally as a real person would. If your answer brings up a new subject the player could ask about, you may append [UNLOCK: subject] using one of: " & lockedList & "."
+            dim usrPrompt as string = "The player asks about: " & topic & ". Reply in character, speaking naturally as a real person would. If your answer brings up a new subject the player could ask about, you may append [UNLOCK: subject] using exactly one of these names: " & lockedList & "."
             dim reply as string = generate_reply(npcs(idx).persona, usrPrompt, npcs(idx).history, askCount)
             ' parse unlock markers
+            dim nTopicsBefore as integer = npcs(idx).nTopics
             dim unlockedNow as string = ""
             dim cleanReply as string = reply
             dim searchPos as integer = 1
@@ -382,11 +388,11 @@ sub talk_to(idx as integer)
                 if finish = 0 then exit do
                 dim subject as string = trim(mid(cleanReply, start + 8, finish - start - 8))
                 for t as integer = 0 to 9
-                    if npcs(idx).topics(t) <> "" and (instr(lcase(npcs(idx).topics(t)), lcase(subject)) > 0 or instr(lcase(subject), lcase(npcs(idx).topics(t))) > 0) then
+                    if npcs(idx).topics(t) <> "" and lcase(trim(npcs(idx).topics(t))) = lcase(trim(subject)) then
                         if t + 1 > npcs(idx).nTopics then
                             npcs(idx).nTopics = t + 1
                         end if
-                        if instr(unlockedNow, subject) = 0 then
+                        if t >= nTopicsBefore andalso instr(unlockedNow, subject) = 0 then
                             if unlockedNow = "" then unlockedNow = subject else unlockedNow = unlockedNow & ", " & subject
                         end if
                     end if
@@ -394,15 +400,47 @@ sub talk_to(idx as integer)
                 cleanReply = left(cleanReply, start - 1) & mid(cleanReply, finish + 1)
                 searchPos = start
             loop
+            ' condensed reply for memory (marker-stripped, no notice)
+            dim condensed as string = cleanReply
+            dim c2 as string = ""
+            for ci as integer = 1 to len(condensed)
+                dim ch as string = mid(condensed, ci, 1)
+                if ch = chr(10) or ch = chr(13) then
+                    c2 += " "
+                else
+                    c2 += ch
+                end if
+            next
+            condensed = trim(c2)
+            if len(condensed) > 160 then condensed = left(condensed, 160)
             if unlockedNow <> "" then
                 cleanReply = cleanReply & chr(10) & "[New topic unlocked: " & unlockedNow & "]"
             end if
             reply = cleanReply
+            ' append memory entry
+            dim memEntry as string = "Asked about " & topic & " - you said: " & condensed
+            dim newHistory as string
             if npcs(idx).history = "" then
-                npcs(idx).history = topic
+                newHistory = memEntry
             else
-                npcs(idx).history = npcs(idx).history & ", " & topic
+                newHistory = npcs(idx).history & " | " & memEntry
             end if
+            ' keep at most 5 entries
+            dim ecount as integer = 1
+            dim epos as integer = 1
+            do
+                dim ep as integer = instr(epos, newHistory, " | ")
+                if ep = 0 then exit do
+                ecount += 1
+                epos = ep + 3
+            loop
+            do while ecount > 5
+                dim ep2 as integer = instr(newHistory, " | ")
+                if ep2 = 0 then exit do
+                newHistory = mid(newHistory, ep2 + 3)
+                ecount -= 1
+            loop
+            npcs(idx).history = newHistory
             ' show
             screenlock
             line (0, 390)-(799, 599), rgb(20,20,30), bf
@@ -410,10 +448,6 @@ sub talk_to(idx as integer)
             draw_textbox npcs(idx).nombre, reply
             sleep
             while inkey <> "": wend
-            ' unlock next topic
-            if npcs(idx).nTopics < 10 and npcs(idx).topics(npcs(idx).nTopics) <> "" then
-                npcs(idx).nTopics += 1
-            end if
         elseif k = chr(27) or k = "q" or k = "Q" then
             done = 1
         end if
