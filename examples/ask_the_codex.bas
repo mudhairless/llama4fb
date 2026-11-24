@@ -57,17 +57,38 @@ end type
 declare function my_ctx_default_params alias "llama_context_default_params"() as MY_CTX_PARAMS
 declare function my_init_from_model alias "llama_init_from_model"(byval model as llama_model ptr, byval params as MY_CTX_PARAMS) as llama_context ptr
 
-' ---------- model-specific constants (change these for a bake-off) ----------
-const MODEL_NAME     = "Qwen3-Embedding-0.6B-Q8_0.gguf"
-const MODEL_URL      = "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf"
-const MODEL_PATH     = "models/" & MODEL_NAME
-const POOLING_TYPE   = LLAMA_POOLING_TYPE_LAST   ' decoder model: last-token pooling
-const N_CTX          = 1024
-const N_BATCH        = 1024
-const N_GPU_LAYERS   = -1
-const DOC_PREFIX     = ""                         ' documents embedded raw
-const QUERY_INSTRUCT = "Instruct: Given a game lore question, retrieve relevant codex entries that answer the question" & chr(10) & "Query: "
+' ---------- qwen3 profile constants ----------
+const QWEN_MODEL_NAME   = "Qwen3-Embedding-0.6B-Q8_0.gguf"
+const QWEN_MODEL_URL    = "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf"
+const QWEN_POOLING_TYPE = LLAMA_POOLING_TYPE_LAST
+const QWEN_N_CTX        = 1024
+const QWEN_DOC_PREFIX   = ""
+const QWEN_QUERY_PREFIX = "Instruct: Given a game lore question, retrieve relevant codex entries that answer the question" & chr(10) & "Query: "
+const QWEN_ADD_SPECIAL  = 0
+const QWEN_APPEND_EOS   = 1
 
+' ---------- nomic profile constants ----------
+const NOMIC_MODEL_NAME   = "nomic-embed-text-v1.5.Q8_0.gguf"
+const NOMIC_MODEL_URL    = "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf"
+const NOMIC_POOLING_TYPE = LLAMA_POOLING_TYPE_MEAN
+const NOMIC_N_CTX        = 1024
+const NOMIC_DOC_PREFIX   = "search_document: "
+const NOMIC_QUERY_PREFIX = "search_query: "
+const NOMIC_ADD_SPECIAL  = 1
+const NOMIC_APPEND_EOS   = 0
+
+' ---------- active profile (selected by --model) ----------
+dim shared MODEL_NAME     as string
+dim shared MODEL_URL      as string
+dim shared MODEL_PATH     as string
+dim shared POOLING_TYPE   as long
+dim shared N_CTX          as long
+dim shared N_BATCH        as long = 1024
+dim shared N_GPU_LAYERS   as long = -1
+dim shared DOC_PREFIX     as string
+dim shared QUERY_PREFIX   as string
+dim shared ADD_SPECIAL    as integer
+dim shared APPEND_EOS     as integer
 const N_ENTRIES = 24
 
 ' ---------- globals ----------
@@ -134,30 +155,32 @@ end sub
 
 ' ---------- core embedding ----------
 function embed_one(s as string) as single ptr
-    ' tokenize (add_special false)
+    ' tokenize
     dim maxT as long = 4096
     dim toks as llama_token ptr = allocate(maxT * sizeof(llama_token))
-    dim nTok as long = llama_tokenize(g_vocab, strptr(s), len(s), toks, maxT, false, false)
+    dim nTok as long = llama_tokenize(g_vocab, strptr(s), len(s), toks, maxT, ADD_SPECIAL <> 0, false)
     if nTok < 0 then
         nTok = -nTok
         if nTok > maxT then
             deallocate(toks)
             toks = allocate(nTok * sizeof(llama_token))
-            nTok = llama_tokenize(g_vocab, strptr(s), len(s), toks, nTok, false, false)
+            nTok = llama_tokenize(g_vocab, strptr(s), len(s), toks, nTok, ADD_SPECIAL <> 0, false)
         end if
     end if
-    ' append EOS token (last-token pooling is defined over that final position)
-    if nTok + 1 > maxT then
-        deallocate(toks)
-        toks = allocate((nTok + 1) * sizeof(llama_token))
+    ' append EOS token only for last-token pooling profile
+    if APPEND_EOS <> 0 then
+        if nTok + 1 > maxT then
+            deallocate(toks)
+            toks = allocate((nTok + 1) * sizeof(llama_token))
+        end if
+        *(toks + nTok) = llama_vocab_eos(g_vocab)
+        nTok += 1
     end if
-    *(toks + nTok) = llama_vocab_eos(g_vocab)
-    nTok += 1
 
     ' clear memory
     llama_memory_clear(llama_get_memory(g_ctx), true)
 
-    ' build batch: whole text as seq 0, positions 0..n-1, output flag on LAST token only
+    ' build batch: whole text as seq 0, positions 0..n-1
     dim batch as llama_batch = llama_batch_init(nTok, 0, 1)
     dim tokArr as llama_token ptr = batch.token
     dim posArr as llama_pos ptr = batch.pos
@@ -169,15 +192,23 @@ function embed_one(s as string) as single ptr
         if posArr <> 0 then *(posArr + i) = i
         *(nseqArr + i) = 1
         if seqArr <> 0 then *(*(seqArr + i)) = 0
-        if i = nTok-1 then
+        if POOLING_TYPE = LLAMA_POOLING_TYPE_MEAN then
             *(logArr + i) = 1
         else
-            *(logArr + i) = 0
+            if i = nTok-1 then
+                *(logArr + i) = 1
+            else
+                *(logArr + i) = 0
+            end if
         end if
     next
     batch.n_tokens = nTok
 
-    llama_decode(g_ctx, batch)
+    if llama_model_has_encoder(g_model) orelse (llama_get_memory(g_ctx) = 0) then
+        llama_encode(g_ctx, batch)
+    else
+        llama_decode(g_ctx, batch)
+    end if
     llama_batch_free(batch)
 
     ' copy nEmbd floats out immediately (pointer dies at next decode)
@@ -202,14 +233,14 @@ function embed_one(s as string) as single ptr
     return vec
 end function
 
-' documents are embedded RAW (no prefix)
+' documents
 function embed_document(text as string) as single ptr
     return embed_one(DOC_PREFIX & text)
 end function
 
-' queries carry the instruct prefix
+' queries
 function embed_query(text as string) as single ptr
-    return embed_one(QUERY_INSTRUCT & text)
+    return embed_one(QUERY_PREFIX & text)
 end function
 
 function dot(a as single ptr, b as single ptr) as single
@@ -273,10 +304,40 @@ end sub
 
 ' ---------- main ----------
 ' parse flags first
+dim modelChoice as string = "qwen3"
 for ai as integer = 1 to 10
     if command(ai) = "--log" or command(ai) = "-log" then logging = 1
     if command(ai) = "--demo" then demoMode = 1
+    if command(ai) = "--model" then
+        modelChoice = command(ai + 1)
+        if modelChoice <> "qwen3" and modelChoice <> "nomic" then
+            print "Usage: ask_the_codex [--demo] [--log] [--model {qwen3|nomic}]"
+            end 1
+        end if
+    end if
 next
+
+' select profile
+if modelChoice = "qwen3" then
+    MODEL_NAME = QWEN_MODEL_NAME
+    MODEL_URL = QWEN_MODEL_URL
+    POOLING_TYPE = QWEN_POOLING_TYPE
+    N_CTX = QWEN_N_CTX
+    DOC_PREFIX = QWEN_DOC_PREFIX
+    QUERY_PREFIX = QWEN_QUERY_PREFIX
+    ADD_SPECIAL = QWEN_ADD_SPECIAL
+    APPEND_EOS = QWEN_APPEND_EOS
+else
+    MODEL_NAME = NOMIC_MODEL_NAME
+    MODEL_URL = NOMIC_MODEL_URL
+    POOLING_TYPE = NOMIC_POOLING_TYPE
+    N_CTX = NOMIC_N_CTX
+    DOC_PREFIX = NOMIC_DOC_PREFIX
+    QUERY_PREFIX = NOMIC_QUERY_PREFIX
+    ADD_SPECIAL = NOMIC_ADD_SPECIAL
+    APPEND_EOS = NOMIC_APPEND_EOS
+end if
+MODEL_PATH = "models/" & MODEL_NAME
 
 ensure_model()
 
@@ -344,6 +405,7 @@ if demoMode = 1 then
     dim top1count as integer = 0
     dim top3count as integer = 0
     dim minInScopeTop1 as single = 2.0
+    dim marginSum as double = 0
     for ti as integer = 0 to 9
         print "Q: " & testQ(ti)
         print "Expected: " & expected(ti)
@@ -357,20 +419,19 @@ if demoMode = 1 then
             print str(r+1) & ". [" & format(scores(r), "0.000") & "] " & titles(idxs(r))
             print "    " & texts(idxs(r))
         next
+        ' all scores for margin and rank
+        dim allsc(N_ENTRIES-1) as single
+        for i as integer = 0 to N_ENTRIES-1
+            allsc(i) = dot(qv, corpusEmb + i * nEmbd)
+        next
         ' rank of expected
         dim expRank as integer = 0
         for r as integer = 0 to 2
             if titles(idxs(r)) = expected(ti) then expRank = r + 1
         next
         if expRank = 0 then
-            ' search beyond top3
-            dim allsc(N_ENTRIES-1) as single
-            for i as integer = 0 to N_ENTRIES-1
-                allsc(i) = dot(qv, corpusEmb + i * nEmbd)
-            next
             for i as integer = 0 to N_ENTRIES-1
                 if titles(i) = expected(ti) then
-                    ' compute rank
                     dim rk as integer = 1
                     for j as integer = 0 to N_ENTRIES-1
                         if allsc(j) > allsc(i) then rk += 1
@@ -380,6 +441,19 @@ if demoMode = 1 then
             next
         end if
         print "rank of expected: " & str(expRank)
+        ' margin
+        dim expIdx as integer = -1
+        for i as integer = 0 to N_ENTRIES-1
+            if titles(i) = expected(ti) then expIdx = i
+        next
+        dim expScore as single = allsc(expIdx)
+        dim bestOther as single = -1e9
+        for i as integer = 0 to N_ENTRIES-1
+            if i <> expIdx andalso allsc(i) > bestOther then bestOther = allsc(i)
+        next
+        dim margin as single = expScore - bestOther
+        marginSum += margin
+        print "margin=" & format(margin, "0.000")
         if expRank = 1 then top1count += 1
         if expRank >= 1 and expRank <= 3 then top3count += 1
         if scores(0) < minInScopeTop1 then minInScopeTop1 = scores(0)
@@ -390,6 +464,7 @@ if demoMode = 1 then
                 log_msg(str(r+1) & " " & titles(idxs(r)) & " " & format(scores(r), "0.000"))
             next
             log_msg("rank=" & str(expRank) & " q_ms=" & format(qMs, "0.0"))
+            log_msg("margin=" & format(margin, "0.000"))
         end if
         deallocate(qv)
     next
@@ -418,10 +493,13 @@ if demoMode = 1 then
     end if
     deallocate(qv2)
 
+    dim meanMargin as double = marginSum / 10.0
     print "top1=" & str(top1count) & "/10 top3=" & str(top3count) & "/10"
+    print "mean_margin=" & format(meanMargin, "0.000")
     print "out-of-scope: " & format(oosTop, "0.000") & " vs lowest in-scope top-1: " & format(minInScopeTop1, "0.000")
     if logging = 1 then
         log_msg("top1=" & str(top1count) & "/10 top3=" & str(top3count) & "/10")
+        log_msg("mean_margin=" & format(meanMargin, "0.000"))
         log_msg("out-of-scope: " & format(oosTop, "0.000") & " vs lowest in-scope top-1: " & format(minInScopeTop1, "0.000"))
     end if
 
