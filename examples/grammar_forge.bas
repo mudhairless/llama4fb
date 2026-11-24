@@ -130,7 +130,7 @@ sub llm_init()
     llama_sampler_chain_add(g_smp, llama_sampler_init_top_k(40))
     llama_sampler_chain_add(g_smp, llama_sampler_init_top_p(0.9, 1))
     llama_sampler_chain_add(g_smp, llama_sampler_init_temp(0.8))
-    llama_sampler_chain_add(g_smp, llama_sampler_init_dist(42))
+    llama_sampler_chain_add(g_smp, llama_sampler_init_dist(LLAMA_DEFAULT_SEED))
 end sub
 
 ' ---------- generation ----------
