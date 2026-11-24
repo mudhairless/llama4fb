@@ -34,6 +34,8 @@ dim shared nNpc as integer = 5
 dim shared endingDone as integer = 0
 dim shared logging as integer = 0
 dim shared demoMode as integer = 0
+dim shared demoAskCount as integer = 0
+dim shared demoStarted as integer = 0
 
 ' ---------- LLM globals ----------
 dim shared g_model as llama_model ptr
@@ -187,6 +189,9 @@ function generate_reply(sysPrompt as string, usrPrompt as string, history as str
             filtered += " "
         end if
     next
+    log_msg("SYS=" & fullSys)
+    log_msg("USR=" & usrPrompt)
+    log_msg("REPLY=" & filtered)
     return filtered
 end function
 
@@ -228,9 +233,13 @@ sub show_reply(npcName as string, reply as string)
         next
         draw string (70, 565), "Page " & str(page+1) & "/" & str(totalPages) & "  Press any key..."
         screenunlock
-        while inkey <> "": wend
-        sleep
-        while inkey <> "": wend
+        if demoMode = 1 then
+            sleep 500
+        else
+            while inkey <> "": wend
+            sleep
+            while inkey <> "": wend
+        end if
         page += 1
     wend
 end sub
@@ -300,9 +309,13 @@ sub show_journal()
     draw string (70, y), "Clues: " & str(total) & "/3"
     draw string (70, 500), "Press any key to close..."
     screenunlock
-    while inkey <> "": wend
-    sleep
-    while inkey <> "": wend
+    if demoMode = 1 then
+        sleep 500
+    else
+        while inkey <> "": wend
+        sleep
+        while inkey <> "": wend
+    end if
 end sub
 
 ' ---------- init npcs ----------
@@ -460,7 +473,17 @@ sub talk_to(idx as integer)
         draw string (90, 330), "Up/Down select, Enter ask, Esc leave"
         screenunlock
 
-        dim k as string = inkey
+        dim k as string
+        if demoMode = 1 then
+            sleep 400
+            if sel < totalItems then
+                k = chr(13)
+            else
+                k = "q"
+            end if
+        else
+            k = inkey
+        end if
         if k = chr(255)+"H" then
             sel -= 1
             if sel < 0 then sel = totalItems - 1
@@ -492,7 +515,14 @@ sub talk_to(idx as integer)
                     next
                     draw string (90, 330), "Up/Down select, Enter ask, Esc back"
                     screenunlock
-                    dim tk as string = inkey
+                    dim tk as string
+                    if demoMode = 1 then
+                        sleep 200
+                        toneSel = demoAskCount mod 5
+                        tk = chr(13)
+                    else
+                        tk = inkey
+                    end if
                     if tk = chr(255)+"H" then
                         toneSel -= 1
                         if toneSel < 0 then toneSel = 4
@@ -538,6 +568,7 @@ sub talk_to(idx as integer)
                 end if
 
                 npcs(idx).asked(realTopic) += 1
+                demoAskCount += 1
                 dim askCount as integer = npcs(idx).asked(realTopic)
 
                 ' disposition update
@@ -659,6 +690,7 @@ sub talk_to(idx as integer)
                     ecount -= 1
                 loop
                 npcs(idx).history = newHistory
+                if demoMode = 1 then sel += 1
                 log_msg("NPC=" & npcs(idx).nombre & " TOPIC=" & topic & " TONE=" & toneWord & " DISPOSITION=" & str(npcs(idx).disposition) & " HISTORY=" & npcs(idx).history)
 
                 screenlock
@@ -677,9 +709,13 @@ sub talk_to(idx as integer)
                 draw string (100, 240), "Willowbrook is safe."
                 draw string (100, 300), "Press any key..."
                 screenunlock
-                while inkey <> "": wend
-                sleep
-                while inkey <> "": wend
+                if demoMode = 1 then
+                    sleep 800
+                else
+                    while inkey <> "": wend
+                    sleep
+                    while inkey <> "": wend
+                end if
                 endingDone = 1
                 done = 1
             end if
@@ -755,6 +791,14 @@ do
         show_journal()
     end if
     lastJ = jNow
+
+    if demoMode = 1 and demoStarted = 0 then
+        demoStarted = 1
+        for di as integer = 0 to nNpc-1
+            talk_to(di)
+        next
+        show_journal()
+    end if
 
     screenlock
     line (0,0)-(SC_W-1, SC_H-1), rgb(50,110,50), bf
