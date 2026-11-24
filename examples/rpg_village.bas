@@ -590,9 +590,9 @@ sub talk_to(idx as integer)
                 screenunlock
                 dim usrPrompt as string
                 if toneSentence = "" then
-                    usrPrompt = "The player asks about: " & topic & ". Reply in character, speaking naturally as a real person would. If your answer brings up a new subject the player could ask about, you may append [UNLOCK: subject] using exactly one of these names: " & lockedList & "."
+                    usrPrompt = "The player asks about: " & topic & ". Do not greet the player again; answer directly. Reply in character, speaking naturally as a real person would. If your answer brings up a new subject the player could ask about, you may append [UNLOCK: subject] using exactly one of these names: " & lockedList & "."
                 else
-                    usrPrompt = toneSentence & " Reply in character, speaking naturally as a real person would. If your answer brings up a new subject the player could ask about, you may append [UNLOCK: subject] using exactly one of these names: " & lockedList & "."
+                    usrPrompt = toneSentence & " Do not greet the player again; answer directly. Reply in character, speaking naturally as a real person would. If your answer brings up a new subject the player could ask about, you may append [UNLOCK: subject] using exactly one of these names: " & lockedList & "."
                 end if
                 dim reply as string = generate_reply(npcs(idx).persona, usrPrompt, npcs(idx).history, askCount, npcs(idx).disposition)
 
