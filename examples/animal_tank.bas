@@ -1209,6 +1209,7 @@ dim demoIndex as integer = 0
 dim lastTime as double = timer
 dim decideIdx as integer = 0
 dim lastAttempt as double = timer
+dim lastFloorCheck as double = timer
 
 do
     dim dt as single = timer - lastTime
@@ -1760,6 +1761,38 @@ animals(i).hunger -= dt*0.3
             foods(f).active = 1
         end if
     next
+
+    ' population floor keeper: top up any species below 2
+    if timer - lastFloorCheck >= 3.0 then
+        lastFloorCheck = timer
+        dim floorSpecies(0 to 7) as string = {"lion","cheetah","hyena","gazelle","zebra","wildebeest","elephant","giraffe"}
+        for si as integer = 0 to 7
+            dim sp as string = floorSpecies(si)
+            dim c as integer = count_species(sp)
+            if c < 2 then
+                dim surv as integer = -1
+                for j as integer = 0 to MAX_ANIMALS-1
+                    if animals(j).active=1 and animals(j).species=sp then
+                        surv = j
+                        exit for
+                    end if
+                next
+                dim bx as single, by as single
+                if surv >= 0 then
+                    bx = animals(surv).x
+                    by = animals(surv).y
+                else
+                    bx = ponds(0).x + ponds(0).r + 30
+                    by = ponds(0).y
+                end if
+                dim need as integer = 2 - c
+                for k as integer = 1 to need
+                    spawn_animal sp, bx, by
+                    log_msg("floor: spawned " & sp & " (was " & str(c) & ")")
+                next
+            end if
+        next
+    end if
 
     if timer - lastAttempt > 0.05 then
         lastAttempt = timer
