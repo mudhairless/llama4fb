@@ -1,0 +1,106 @@
+#pragma once
+
+#include once "ggml-backend.bi"
+#include once "ggml.bi"
+
+extern "C"
+
+/'
+ * Copyright (c) 2023-2026 The ggml authors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ '/
+/'*
+ * @brief Maximum number of CANN devices supported.
+ '/
+const GGML_CANN_MAX_DEVICES = 16
+declare function ggml_backend_cann_reg() as ggml_backend_reg_t
+/'*
+ * @brief Initializes the CANN backend for a specified device.
+ *
+ * This function initializes the CANN backend for the given device.
+ * It verifies the device index, allocates a context, and creates a backend
+ * instance.
+ *
+ * @param device The index of the device to initialize.
+ * @return A pointer to the initialized backend instance, or nullptr on failure.
+ '/
+declare function ggml_backend_cann_init(byval device as long) as ggml_backend_t
+/'*
+ * @brief Checks if a given backend is a CANN backend.
+ *
+ * This function verifies if the provided backend is a CANN backend by comparing
+ * its GUID with the CANN backend's GUID.
+ *
+ * @param backend The backend instance to check.
+ * @return True if the backend is a CANN backend, false otherwise.
+ '/
+declare function ggml_backend_is_cann(byval backend as ggml_backend_t) as bool
+/'*
+ * @brief Retrieves the CANN buffer type for a specified device.
+ *
+ * This function initializes and returns the buffer type interface associated
+ * with the given device. It ensures thread-safe access using a mutex.
+ *
+ * @param device The device index for which to retrieve the buffer type.
+ * @return A pointer to the buffer type interface for the specified device, or
+ * nullptr if the device index is out of range.
+ '/
+declare function ggml_backend_cann_buffer_type(byval device as long) as ggml_backend_buffer_type_t
+/'*
+ * @brief Retrieves the number of CANN devices available.
+ *
+ * This function returns the number of CANN devices available based on
+ * information obtained from `ggml_cann_info()`.
+ *
+ * @return The number of CANN devices available.
+ '/
+declare function ggml_backend_cann_get_device_count() as long
+/'*
+ * @brief pinned host buffer for use with the CPU backend for faster copies between CPU and NPU.
+ *
+ * @return A pointer to the host buffer type interface.
+ '/
+declare function ggml_backend_cann_host_buffer_type() as ggml_backend_buffer_type_t
+/'*
+ * @brief Retrieves the description of a specific CANN device.
+ *
+ * This function sets the specified device, retrieves the SoC name,
+ * and writes it into the provided description buffer.
+ *
+ * @param device The device index to retrieve the description for.
+ * @param description Pointer to a buffer where the description will be written.
+ * @param description_size Size of the description buffer.
+ '/
+declare sub ggml_backend_cann_get_device_description(byval device as long, byval description as zstring ptr, byval description_size as uinteger)
+/'*
+ * @brief Retrieves the memory information of a specific CANN device.
+ *
+ * This function sets the specified device, retrieves the free and total
+ * memory information of the specified type (ACL_HBM_MEM), and stores them
+ * in the provided pointers.
+ *
+ * @param device The device index to retrieve memory information for.
+ * @param free Pointer to a variable where the free memory size will be stored.
+ * @param total Pointer to a variable where the total memory size will be
+ * stored.
+ '/
+declare sub ggml_backend_cann_get_device_memory(byval device as long, byval free as uinteger ptr, byval total as uinteger ptr)
+
+end extern

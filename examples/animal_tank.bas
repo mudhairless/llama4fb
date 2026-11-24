@@ -1,0 +1,1676 @@
+' animal_tank.bas - autonomous wildlife tank demo using raon-1-nano via llama.cpp
+' A "fish tank" where instead of fish there are land animals that decide their own
+' next action by prompting the model. Arrow keys pan the viewport.
+' Build: see build_animal_tank.sh / run_animal_tank.sh
+
+#include once "fbgfx.bi"
+#include once "llama.bi"
+
+const SC_W = 800
+const SC_H = 600
+const WORLD_W = 2600
+const WORLD_H = 1900
+const VISION = 260
+const DECIDE_INTERVAL = 0.75
+const MAX_ANIMALS = 80
+const MAX_CORPSES = 100
+
+' ---------- world data ----------
+type Pond
+    x as single
+    y as single
+    r as single
+end type
+
+type Food
+    x as single
+    y as single
+    active as integer
+    regen as double
+end type
+
+type Corpse
+    active as integer
+    x as single
+    y as single
+    food as integer
+    expire as double
+end type
+
+type Animal
+    active as integer
+    species as string
+    x as single
+    y as single
+    vx as single
+    vy as single
+    hunger as single
+    thirst as single
+    state as string
+    moveTimer as double
+    lastDecide as double
+    lastAction as string
+    actionTime as double
+    mateCooldown as double
+    energy as single
+    sleepTimer as double
+    hp as single
+    attackedTimer as double
+    goal as string
+    attacker as integer
+    size as single
+    col as uinteger
+end type
+
+dim shared ponds(0 to 6) as Pond
+dim shared nPonds as integer = 1
+dim shared foods(0 to 119) as Food
+dim shared nFoods as integer = 120
+dim shared animals(0 to MAX_ANIMALS-1) as Animal
+dim shared selectedAnimal as integer = -1
+dim shared logging as integer = 0
+dim shared demoMode as integer = 0
+dim shared nAnimals as integer = 0
+dim shared corpses(0 to MAX_CORPSES-1) as Corpse
+dim shared nCorpses as integer = 0
+
+' ---------- LLM globals ----------
+dim shared g_model as llama_model ptr
+dim shared g_ctx as llama_context ptr
+dim shared g_smp as llama_sampler ptr
+dim shared g_tmpl as const zstring ptr
+dim shared g_vocab as const llama_vocab ptr
+
+sub ensure_model()
+    dim modelPath as string = "models/raon-1-nano-Q4_K_M.gguf"
+    if dir("models") = "" then mkdir "models"
+    if dir(modelPath) = "" then
+        print "Model not found. Downloading (~2GB). This may take a while..."
+        shell "curl -L -o " & modelPath & " https://huggingface.co/KRAFTON/Raon-1-nano-gguf/resolve/main/raon-1-nano-Q4_K_M.gguf"
+        if dir(modelPath) = "" then
+            print "Download failed."
+            sleep
+            end
+        end if
+    end if
+end sub
+
+sub llm_init()
+    ensure_model()
+    dim modelPath as string = "models/raon-1-nano-Q4_K_M.gguf"
+    dim mparams as llama_model_params = llama_model_default_params()
+    mparams.n_gpu_layers = -1
+    g_model = llama_model_load_from_file(strptr(modelPath), mparams)
+    if g_model = 0 then
+        print "Failed to load model"
+        sleep
+        end
+    end if
+    dim cparams as llama_context_params = llama_context_default_params()
+    cparams.n_ctx = 2048
+    cparams.n_batch = 512
+    g_ctx = llama_init_from_model(g_model, cparams)
+    g_vocab = llama_model_get_vocab(g_model)
+    g_tmpl = llama_model_chat_template(g_model, 0)
+
+    dim sparams as llama_sampler_chain_params = llama_sampler_chain_default_params()
+    g_smp = llama_sampler_chain_init(sparams)
+    llama_sampler_chain_add(g_smp, llama_sampler_init_top_k(40))
+    llama_sampler_chain_add(g_smp, llama_sampler_init_top_p(0.9, 1))
+    llama_sampler_chain_add(g_smp, llama_sampler_init_temp(0.7))
+    llama_sampler_chain_add(g_smp, llama_sampler_init_dist(42))
+end sub
+
+function generate_reply(sysPrompt as string, usrPrompt as string) as string
+    llama_memory_clear(llama_get_memory(g_ctx), true)
+
+    dim fullSys as string = sysPrompt
+    fullSys = fullSys & chr(10) & "Use only ASCII characters in your reply. Reply with exactly one line, no explanation."
+    dim prompt as string
+    prompt = "<|im_start|>system" & chr(10) & fullSys & chr(10) & "<|im_end|>" & chr(10)
+    prompt = prompt & "<|im_start|>user" & chr(10) & usrPrompt & chr(10) & "<|im_end|>" & chr(10)
+    prompt = prompt & "ASSISTANT_TOKENassistant" & chr(10) & " <think> </think> " & chr(10) & chr(10)
+
+    dim maxT as long = 4096
+    dim toks as llama_token ptr = allocate(maxT * sizeof(llama_token))
+    dim nTok as long = llama_tokenize(g_vocab, strptr(prompt), len(prompt), toks, maxT, true, true)
+    if nTok < 0 then
+        nTok = -nTok
+        if nTok > maxT then
+            deallocate(toks)
+            toks = allocate(nTok * sizeof(llama_token))
+            nTok = llama_tokenize(g_vocab, strptr(prompt), len(prompt), toks, nTok, true, true)
+        end if
+    end if
+
+    dim batch as llama_batch = llama_batch_init(nTok, 0, 1)
+    dim tokArr as llama_token ptr = batch.token
+    dim posArr as llama_pos ptr = batch.pos
+    dim nseqArr as long ptr = batch.n_seq_id
+    dim seqArr as llama_seq_id ptr ptr = batch.seq_id
+    dim logArr as byte ptr = batch.logits
+    for i as integer = 0 to nTok-1
+        *(tokArr + i) = *(toks + i)
+        if posArr <> 0 then *(posArr + i) = i
+        *(nseqArr + i) = 1
+        if seqArr <> 0 then
+            *(*(seqArr + i)) = 0
+        end if
+        *(logArr + i) = 0
+    next
+    *(logArr + (nTok-1)) = 1
+    batch.n_tokens = nTok
+
+    llama_decode(g_ctx, batch)
+    llama_batch_free(batch)
+
+    dim result as string = ""
+    dim nCur as long = nTok
+    dim nGen as integer = 0
+    while nGen < 120
+        dim tok as llama_token = llama_sampler_sample(g_smp, g_ctx, -1)
+        llama_sampler_accept(g_smp, tok)
+        if llama_token_is_eog(g_vocab, tok) then exit while
+        dim pbuf as zstring ptr = allocate(512)
+        dim plen as long = llama_token_to_piece(g_vocab, tok, pbuf, 512, 0, true)
+        if plen > 0 then result += left(*pbuf, plen)
+        deallocate(pbuf)
+
+        dim b2 as llama_batch = llama_batch_init(1, 0, 1)
+        dim t2 as llama_token ptr = b2.token
+        dim p2 as llama_pos ptr = b2.pos
+        dim n2 as long ptr = b2.n_seq_id
+        dim s2 as llama_seq_id ptr ptr = b2.seq_id
+        dim l2 as byte ptr = b2.logits
+        *t2 = tok
+        if p2 <> 0 then *p2 = nCur
+        *n2 = 1
+        if s2 <> 0 then **s2 = 0
+        *l2 = 1
+        b2.n_tokens = 1
+        llama_decode(g_ctx, b2)
+        llama_batch_free(b2)
+        nCur += 1
+        nGen += 1
+    wend
+
+    deallocate(toks)
+
+    dim filtered as string = ""
+    for i as integer = 1 to len(result)
+        dim c as integer = asc(mid(result, i, 1))
+        if (c >= 32 and c <= 126) or c = 10 or c = 13 then
+            filtered += mid(result, i, 1)
+        elseif c = 9 then
+            filtered += " "
+        end if
+    next
+    ' strip any thinking block
+    dim tstart as integer = instr(lcase(filtered), "<think>")
+    if tstart > 0 then
+        dim tend as integer = instr(tstart, lcase(filtered), "</think>")
+        if tend > 0 then
+            filtered = mid(filtered, tend + len("</think>"))
+        else
+            ' no closing tag; drop everything up to end
+            filtered = ""
+        end if
+    end if
+    dim nl as integer = instr(filtered, chr(10))
+    if nl > 0 then filtered = left(filtered, nl-1)
+    return trim(filtered)
+end function
+
+' ---------- helpers ----------
+function dist(ax as single, ay as single, bx as single, by as single) as single
+    return sqr((ax-bx)^2 + (ay-by)^2)
+end function
+
+sub init_world()
+    ' one large watering hole
+    ponds(0).x=WORLD_W/2: ponds(0).y=WORLD_H/2: ponds(0).r=200
+
+    randomize timer
+    for i as integer = 0 to nFoods-1
+        foods(i).x = 60 + rnd*(WORLD_W-120)
+        foods(i).y = 60 + rnd*(WORLD_H-120)
+        foods(i).active = 1
+        foods(i).regen = 0
+    next
+
+    dim speciesList(0 to 7) as string = {"lion","cheetah","hyena","gazelle","zebra","wildebeest","elephant","giraffe"}
+    dim sizes(0 to 7) as single = {18, 14, 15, 10, 13, 14, 26, 22}
+    dim cols(0 to 7) as uinteger = {rgb(210,170,90), rgb(220,180,70), rgb(120,100,80), rgb(200,170,120), rgb(235,235,235), rgb(90,70,50), rgb(150,150,150), rgb(200,170,90)}
+    ' species mix: more prey than predators
+    dim initSpecies(0 to 13) as string = {"lion","lion","cheetah","hyena", _
+        "gazelle","gazelle","gazelle","gazelle","zebra","zebra", _
+        "wildebeest","wildebeest","elephant","giraffe"}
+    ' herd centers for prey clustering
+    dim herd1x as single = WORLD_W*0.35
+    dim herd1y as single = WORLD_H*0.4
+    dim herd2x as single = WORLD_W*0.65
+    dim herd2y as single = WORLD_H*0.6
+    for i as integer = 0 to 13
+        dim spName as string = initSpecies(i)
+        ' find index in speciesList
+        dim sp as integer = 0
+        for t as integer = 0 to 7
+            if speciesList(t)=spName then sp=t
+        next
+        animals(i).active = 1
+        animals(i).species = spName
+        if spName="lion" or spName="cheetah" or spName="hyena" then
+            animals(i).x = 100 + rnd*(WORLD_W-200)
+            animals(i).y = 100 + rnd*(WORLD_H-200)
+        else
+            ' cluster prey around a herd center
+            dim cx as single, cy as single
+            if rnd < 0.5 then
+                cx = herd1x: cy = herd1y
+            else
+                cx = herd2x: cy = herd2y
+            end if
+            animals(i).x = cx + (rnd*120 - 60)
+            animals(i).y = cy + (rnd*120 - 60)
+        end if
+        if animals(i).x < 20 then animals(i).x = 20
+        if animals(i).y < 20 then animals(i).y = 20
+        if animals(i).x > WORLD_W-20 then animals(i).x = WORLD_W-20
+        if animals(i).y > WORLD_H-20 then animals(i).y = WORLD_H-20
+        animals(i).vx = 0
+        animals(i).vy = 0
+        animals(i).hunger = 20 + rnd*40
+        animals(i).thirst = 20 + rnd*40
+        animals(i).state = "idle"
+        animals(i).moveTimer = 0
+        animals(i).lastDecide = 0
+        animals(i).lastAction = ""
+        animals(i).actionTime = 0
+        animals(i).mateCooldown = 0
+        animals(i).energy = 80 + rnd*20
+        animals(i).sleepTimer = 0
+        animals(i).hp = 100
+        animals(i).attackedTimer = 0
+        animals(i).attacker = -1
+        animals(i).goal = ""
+        animals(i).size = sizes(sp)
+        animals(i).col = cols(sp)
+    next
+    nAnimals = 14
+    for i as integer = 0 to MAX_CORPSES-1
+        corpses(i).active = 0
+    next
+end sub
+
+function species_behavior(sp as string) as string
+    select case sp
+        case "lion": return "You are a lion, an apex predator. You hunt gazelles, zebras and wildebeest. You rest often and dominate the watering hole. You are bold. You target isolated prey when possible. You always drink when thirsty before hunting."
+        case "cheetah": return "You are a cheetah, the fastest predator. You hunt gazelles. You avoid lions. You are alert and quick."
+        case "hyena": return "You are a hyena. You scavenge and hunt in groups, targeting weak prey. You are opportunistic."
+        case "gazelle": return "You are a gazelle. You graze on grass and drink only at water. You strongly prefer to stay within a few body-lengths of your herd mates; being alone is dangerous. You flee immediately from lions, cheetahs and hyenas. Grouping is your main defense."
+        case "zebra": return "You are a zebra. You graze and drink at water. You stay tightly with your herd and are very wary of predators; you flee from lions, cheetahs and hyenas."
+        case "wildebeest": return "You are a wildebeest. You graze in dense herds and move toward water together. You avoid predators and stay with the group."
+        case "elephant": return "You are an elephant. You drink deeply at the watering hole and eat plants. You are large and mostly unthreatened; others give you space."
+        case "giraffe": return "You are a giraffe. You eat leaves from tall trees and drink carefully at water. You are calm and gentle."
+    end select
+    return "You are an animal."
+end function
+
+function species_cap(sp as string) as integer
+    select case sp
+        case "lion": return 4
+        case "cheetah": return 3
+        case "hyena": return 4
+        case "gazelle": return 14
+        case "zebra": return 10
+        case "wildebeest": return 12
+        case "elephant": return 5
+        case "giraffe": return 5
+    end select
+    return 6
+end function
+
+function is_predator(sp as string) as integer
+    if sp="lion" or sp="cheetah" or sp="hyena" then return 1
+    return 0
+end function
+
+function species_size(sp as string) as single
+    select case sp
+        case "lion": return 18
+        case "cheetah": return 14
+        case "hyena": return 15
+        case "gazelle": return 10
+        case "zebra": return 13
+        case "wildebeest": return 14
+        case "elephant": return 26
+        case "giraffe": return 22
+    end select
+    return 12
+end function
+
+function species_color(sp as string) as uinteger
+    select case sp
+        case "lion": return rgb(210,170,90)
+        case "cheetah": return rgb(220,180,70)
+        case "hyena": return rgb(120,100,80)
+        case "gazelle": return rgb(240,225,200)
+        case "zebra": return rgb(235,235,235)
+        case "wildebeest": return rgb(90,70,50)
+        case "elephant": return rgb(150,150,150)
+        case "giraffe": return rgb(200,170,90)
+    end select
+    return rgb(200,200,200)
+end function
+
+function count_species(sp as string) as integer
+    dim c as integer = 0
+    for i as integer = 0 to MAX_ANIMALS-1
+        if animals(i).active=1 and animals(i).species=sp then c+=1
+    next
+    return c
+end function
+
+sub spawn_animal(sp as string, bx as single, by as single)
+    dim slot as integer = -1
+    for i as integer = 0 to MAX_ANIMALS-1
+        if animals(i).active=0 then
+            slot=i
+            exit for
+        end if
+    next
+    if slot=-1 then
+        if nAnimals < MAX_ANIMALS then
+            slot=nAnimals
+            nAnimals+=1
+        else
+            return
+        end if
+    end if
+    animals(slot).active=1
+    animals(slot).species=sp
+    animals(slot).x=bx + (rnd*40-20)
+    animals(slot).y=by + (rnd*40-20)
+    if animals(slot).x<20 then animals(slot).x=20
+    if animals(slot).y<20 then animals(slot).y=20
+    if animals(slot).x>WORLD_W-20 then animals(slot).x=WORLD_W-20
+    if animals(slot).y>WORLD_H-20 then animals(slot).y=WORLD_H-20
+    animals(slot).vx=0
+    animals(slot).vy=0
+    animals(slot).hunger=10
+    animals(slot).thirst=10
+    animals(slot).state="idle"
+    animals(slot).moveTimer=0
+    animals(slot).lastDecide=timer + rnd*2
+    animals(slot).lastAction="born"
+    animals(slot).actionTime=timer
+    animals(slot).mateCooldown=timer+8
+    animals(slot).energy=90
+    animals(slot).sleepTimer=0
+    animals(slot).hp=100
+    animals(slot).attackedTimer=0
+    animals(slot).attacker=-1
+    animals(slot).goal=""
+    animals(slot).size=species_size(sp)
+    animals(slot).col=species_color(sp)
+end sub
+
+function dir_from_delta(dx as single, dy as single) as string
+    dim s as string = ""
+    if dy < -10 then s += "N"
+    if dy > 10 then s += "S"
+    if dx > 10 then s += "E"
+    if dx < -10 then s += "W"
+    if s = "" then s = "N"
+    return s
+end function
+
+function dir_name(dx as single, dy as single) as string
+    dim ang as single = atan2(dy, dx)  ' radians, 0=E, positive CCW? FB atan2(y,x)
+    ' map to 8 compass directions
+    dim deg as single = ang * 57.2958
+    if deg < 0 then deg += 360
+    if deg >= 337.5 or deg < 22.5 then return "E"
+    if deg >= 22.5 and deg < 67.5 then return "SE"
+    if deg >= 67.5 and deg < 112.5 then return "S"
+    if deg >= 112.5 and deg < 157.5 then return "SW"
+    if deg >= 157.5 and deg < 202.5 then return "W"
+    if deg >= 202.5 and deg < 247.5 then return "NW"
+    if deg >= 247.5 and deg < 292.5 then return "N"
+    return "NE"
+end function
+
+function dist_desc(d as single) as string
+    if d < 90 then return "near"
+    if d < 180 then return "far"
+    return "very far"
+end function
+
+function build_vision(idx as integer) as string
+    dim s as string = ""
+    dim herd as integer = 0
+    for j as integer = 0 to nAnimals-1
+        if j = idx then continue for
+        dim d as single = dist(animals(idx).x, animals(idx).y, animals(j).x, animals(j).y)
+        if d <= VISION then
+            if animals(j).species = animals(idx).species then herd += 1
+            dim dx as integer = int(animals(j).x - animals(idx).x)
+            dim dy as integer = int(animals(j).y - animals(idx).y)
+            if s <> "" then s += " "
+            s += animals(j).species & " " & dir_name(dx, dy) & " " & dist_desc(d)
+        end if
+    next
+    if is_predator(animals(idx).species)=0 then
+    for f as integer = 0 to nFoods-1
+        if foods(f).active = 0 then continue for
+        dim d as single = dist(animals(idx).x, animals(idx).y, foods(f).x, foods(f).y)
+        if d <= VISION then
+            dim dx as integer = int(foods(f).x - animals(idx).x)
+            dim dy as integer = int(foods(f).y - animals(idx).y)
+            if s <> "" then s += " "
+            s += "food " & dir_name(dx, dy) & " " & dist_desc(d)
+        end if
+    next
+    end if
+    ' water: always show nearest watering hole
+    dim bestP as integer = 0
+    dim bestPD as single = 99999
+    for p as integer = 0 to nPonds-1
+        dim d as single = dist(animals(idx).x, animals(idx).y, ponds(p).x, ponds(p).y)
+        if d < bestPD then
+            bestPD = d
+            bestP = p
+        end if
+    next
+    for p as integer = 0 to nPonds-1
+        if p <> bestP then continue for
+        dim d as single = dist(animals(idx).x, animals(idx).y, ponds(p).x, ponds(p).y)
+        dim dx as integer = int(ponds(p).x - animals(idx).x)
+        dim dy as integer = int(ponds(p).y - animals(idx).y)
+        if s <> "" then s += " "
+        s += "water " & dir_name(dx, dy) & " " & dist_desc(d)
+    next
+    if herd > 0 then
+        s = s & " | herd nearby=" & str(herd)
+    end if
+    if s = "" then s = "nothing nearby"
+    return s
+end function
+
+function remove_substr(s as string, needle as string) as string
+    dim r as string = s
+    dim p as integer = instr(r, needle)
+    while p > 0
+        r = left(r, p-1) + mid(r, p+len(sub))
+        p = instr(r, needle)
+    wend
+    return r
+end function
+
+sub apply_direction(idx as integer, d as string)
+    dim sp as single = 0
+    select case animals(idx).species
+        case "gazelle": sp = 120
+        case "cheetah": sp = 160
+        case "zebra": sp = 95
+        case "wildebeest": sp = 80
+        case "lion": sp = 70
+        case "hyena": sp = 90
+        case "elephant": sp = 40
+        case "giraffe": sp = 50
+    end select
+    dim vx as single = 0, vy as single = 0
+    if instr(d,"N")>0 then vy = -sp
+    if instr(d,"S")>0 then vy = sp
+    if instr(d,"E")>0 then vx = sp
+    if instr(d,"W")>0 then vx = -sp
+    if vx <> 0 and vy <> 0 then
+        vx = vx * 0.7071
+        vy = vy * 0.7071
+    end if
+    animals(idx).vx = vx
+    animals(idx).vy = vy
+    animals(idx).moveTimer = 1.2 + rnd*0.8
+    animals(idx).state = "move"
+end sub
+
+sub log_msg(msg as string)
+    if logging = 0 then return
+    dim f as integer = freefile
+    open "animal_tank.log" for append as #f
+    print #f, msg
+    close #f
+end sub
+
+sub decide_animal(idx as integer)
+    dim dstr as string
+    dim sysPrompt as string
+    sysPrompt = species_behavior(animals(idx).species) & " " & _
+        "You must choose exactly one action. Allowed actions: " & _
+        "MOVE <dir> where dir is N,S,E,W,NE,NW,SE,SW (move that direction), " & _
+        "EAT (eat: predators kill nearby prey; herbivores eat grass), " & _
+        "DRINK (drink nearby water), MATE (mate with nearby same species if population allows), " & _
+        "REST (stay and rest). " & _
+        "Reply with only the action, e.g. MOVE NE or EAT."
+    dim vis as string = build_vision(idx)
+    dim touchWater as integer = 0
+    for p as integer = 0 to nPonds-1
+        if dist(animals(idx).x, animals(idx).y, ponds(p).x, ponds(p).y) <= ponds(p).r + 2 then
+            touchWater = 1
+        end if
+    next
+    dim usrPrompt as string
+    dim attackedStr as string = "no"
+    if animals(idx).attackedTimer > 0 then attackedStr = "yes"
+    dim curGoal as string = animals(idx).goal
+    if curGoal = "" then curGoal = "none"
+    dim inWater as integer = 0
+    for p as integer = 0 to nPonds-1
+        if dist(animals(idx).x, animals(idx).y, ponds(p).x, ponds(p).y) < ponds(p).r then inWater = 1
+    next
+    usrPrompt = "State: fullness=" & str(int(animals(idx).hunger)) & "/100, hydration=" & str(int(animals(idx).thirst)) & "/100, energy=" & str(int(animals(idx).energy)) & "/100, attacked=" & attackedStr & ", in water=" & iif(inWater=1,"yes","no") & ". " & _
+        "Current goal: " & curGoal & ". " & _
+        "Touching water: " & iif(touchWater=1,"yes","no") & ". " & _
+        "Do not enter the water; drink from the edge. " & _
+        "You can see: " & vis & ". " & _
+        "Stay in the central area near the watering hole; avoid map edges. " & _
+        "Urgency: if hydration is below 40 you are thirsty and must move toward water before anything else; if fullness is below 40 you are hungry and must seek food/prey before anything else. If hydration is 0 you are dying of thirst; if fullness is 0 you are starving. " & _
+        "What do you do? DRINK only if touching water."
+
+    dim reply as string = generate_reply(sysPrompt, usrPrompt)
+    dim goalPart as string = ""
+    dim actionPart as string = reply
+    dim gi as integer = instr(ucase(reply), "GOAL:")
+    if gi > 0 then
+        dim rest as string = mid(reply, gi + 5)
+        dim semi as integer = instr(rest, ";")
+        if semi > 0 then
+            goalPart = trim(left(rest, semi - 1))
+            dim ai as integer = instr(ucase(rest), "ACTION:")
+            if ai > 0 then
+                actionPart = trim(mid(rest, ai + 7))
+            else
+                actionPart = trim(mid(rest, semi + 1))
+            end if
+        else
+            goalPart = trim(rest)
+        end if
+    end if
+    if goalPart <> "" then
+        animals(idx).goal = lcase(goalPart)
+    end if
+    ' infer goal from action so LLM can change goals by choosing actions
+    dim ua as string = ucase(actionPart)
+    if instr(ua, "DRINK") > 0 then
+        animals(idx).goal = "drink"
+    elseif instr(ua, "EAT") > 0 then
+        animals(idx).goal = "eat"
+    elseif instr(ua, "REST") > 0 or instr(ua, "SLEEP") > 0 then
+        animals(idx).goal = "rest"
+    elseif instr(ua, "MATE") > 0 then
+        animals(idx).goal = "mate"
+    end if
+    if animals(idx).goal = "" then
+        if animals(idx).thirst < 40 then
+            animals(idx).goal = "drink"
+        elseif animals(idx).hunger < 40 then
+            animals(idx).goal = "eat"
+        else
+            animals(idx).goal = "wander"
+        end if
+    end if
+    if animals(idx).goal = "" then
+        if animals(idx).thirst < 40 then
+            animals(idx).goal = "drink"
+        elseif animals(idx).hunger < 40 then
+            animals(idx).goal = "eat"
+        else
+            animals(idx).goal = "wander"
+        end if
+    end if
+    dim u as string = ucase(actionPart)
+    animals(idx).lastAction = actionPart
+    animals(idx).actionTime = timer
+
+    if instr(u,"EAT") > 0 then
+        dim ate as integer = 0
+        if is_predator(animals(idx).species)=1 then
+            ' try corpse first
+            for c as integer = 0 to MAX_CORPSES-1
+                if corpses(c).active=1 then
+                    if dist(animals(idx).x, animals(idx).y, corpses(c).x, corpses(c).y) < 28 then
+                        corpses(c).food -= 1
+                        if corpses(c).food <= 0 then corpses(c).active = 0
+                        ate = 1
+                        exit for
+                    end if
+                end if
+            next
+            ' otherwise attack prey
+            if ate=0 then
+                for j as integer = 0 to MAX_ANIMALS-1
+                    if j=idx then continue for
+                    if animals(j).active=0 then continue for
+                    if is_predator(animals(j).species)=1 then continue for
+                    if dist(animals(idx).x, animals(idx).y, animals(j).x, animals(j).y) < 35 then
+                        animals(j).hp -= 25
+                        if animals(j).hp <= 0 then
+                            for c as integer = 0 to MAX_CORPSES-1
+                                if corpses(c).active=0 then
+                                    corpses(c).active=1
+                                    corpses(c).x=animals(j).x
+                                    corpses(c).y=animals(j).y
+                                    corpses(c).food=5
+                                    corpses(c).expire=timer+15
+                                    exit for
+                                end if
+                            next
+                            animals(j).active=0
+                        end if
+                        ate=1
+                        exit for
+                    end if
+                next
+            end if
+            if ate then
+                animals(idx).hunger = animals(idx).hunger + 35
+                if animals(idx).hunger > 100 then animals(idx).hunger = 100
+            end if
+        else
+            ' herbivore eats grass
+            for f as integer = 0 to nFoods-1
+                if foods(f).active = 0 then continue for
+                if dist(animals(idx).x, animals(idx).y, foods(f).x, foods(f).y) < 28 then
+                    foods(f).active = 0
+                    foods(f).regen = timer + 8 + rnd*6
+                    ate = 1
+                    exit for
+                end if
+            next
+        end if
+        if ate then
+            animals(idx).state = "eat"
+            animals(idx).lastAction = "EAT"
+            animals(idx).goal = ""
+        else
+            animals(idx).state = "idle"
+            animals(idx).lastAction = "IDLE"
+        end if
+        animals(idx).vx = 0: animals(idx).vy = 0
+        animals(idx).moveTimer = 0.6
+    elseif instr(u,"DRINK") > 0 then
+        dim drank as integer = 0
+        for p as integer = 0 to nPonds-1
+            if dist(animals(idx).x, animals(idx).y, ponds(p).x, ponds(p).y) <= ponds(p).r + 2 then
+                drank = 1
+                exit for
+            end if
+        next
+        if drank then
+            animals(idx).thirst = animals(idx).thirst + 40
+            if animals(idx).thirst > 100 then animals(idx).thirst = 100
+            animals(idx).state = "drink"
+            animals(idx).lastAction = "DRINK"
+            animals(idx).goal = ""
+        else
+            animals(idx).state = "idle"
+            animals(idx).lastAction = "IDLE"
+        end if
+        animals(idx).vx = 0: animals(idx).vy = 0
+        animals(idx).moveTimer = 0.6
+    elseif instr(u,"MATE") > 0 then
+        dim mated as integer = 0
+        if timer >= animals(idx).mateCooldown and count_species(animals(idx).species) < species_cap(animals(idx).species) then
+            for j as integer = 0 to MAX_ANIMALS-1
+                if j=idx then continue for
+                if animals(j).active=0 then continue for
+                if animals(j).species <> animals(idx).species then continue for
+                if dist(animals(idx).x, animals(idx).y, animals(j).x, animals(j).y) < 40 then
+                    spawn_animal animals(idx).species, (animals(idx).x+animals(j).x)/2, (animals(idx).y+animals(j).y)/2
+                    animals(idx).mateCooldown = timer + 12
+                    animals(j).mateCooldown = timer + 12
+                    mated = 1
+                    exit for
+                end if
+            next
+        end if
+        if mated then
+            animals(idx).state = "mate"
+        else
+            animals(idx).state = "idle"
+        end if
+        animals(idx).vx = 0: animals(idx).vy = 0
+        animals(idx).moveTimer = 0.6
+    elseif instr(u,"REST") > 0 then
+        animals(idx).state = "rest"
+        animals(idx).vx = 0: animals(idx).vy = 0
+        animals(idx).moveTimer = 1.5
+    else
+        dstr = ""
+        dim mi as integer = instr(u, "MOVE")
+        if mi > 0 then
+            dim rest as string = trim(mid(u, mi + 4))
+            dim sp as integer = instr(rest, " ")
+            if sp > 0 then rest = left(rest, sp - 1)
+            dstr = trim(rest)
+        end if
+        if dstr = "" then
+            if instr(u, "NW") > 0 then
+                dstr = "NW"
+            elseif instr(u, "NE") > 0 then
+                dstr = "NE"
+            elseif instr(u, "SW") > 0 then
+                dstr = "SW"
+            elseif instr(u, "SE") > 0 then
+                dstr = "SE"
+            elseif instr(u, "N") > 0 then
+                dstr = "N"
+            elseif instr(u, "S") > 0 then
+                dstr = "S"
+            elseif instr(u, "W") > 0 then
+                dstr = "W"
+            elseif instr(u, "E") > 0 then
+                dstr = "E"
+            end if
+        end if
+        if dstr = "" then dstr = "N"
+        if animals(idx).x > WORLD_W - 100 then dstr = remove_substr(dstr, "E")
+        if animals(idx).x < 100 then dstr = remove_substr(dstr, "W")
+        if animals(idx).y > WORLD_H - 100 then dstr = remove_substr(dstr, "S")
+        if animals(idx).y < 100 then dstr = remove_substr(dstr, "N")
+        if dstr = "" then dstr = "N"
+        animals(idx).lastAction = "MOVE " & dstr
+        apply_direction(idx, dstr)
+    end if
+
+    log_msg("DECIDE " & animals(idx).species & " idx=" & str(idx) & " pos=" & str(int(animals(idx).x)) & "," & str(int(animals(idx).y)) & chr(10) & _
+           "SYS: " & sysPrompt & chr(10) & _
+           "USR: " & usrPrompt & chr(10) & _
+           "GOAL: " & animals(idx).goal & chr(10) & _
+           "REPLY: " & reply & chr(10) & _
+           "STATE: " & animals(idx).state & " ACTION: " & animals(idx).lastAction)
+    animals(idx).lastDecide = timer
+end sub
+
+' ---------- drawing ----------
+sub world_to_screen(wx as single, wy as single, camX as single, camY as single, byref sx as integer, byref sy as integer)
+    sx = int(wx - camX)
+    sy = int(wy - camY)
+end sub
+
+sub draw_animal(a as Animal, camX as single, camY as single)
+    if a.active=0 then return
+    dim sx as integer, sy as integer
+    world_to_screen a.x, a.y, camX, camY, sx, sy
+    if sx < -40 or sx > SC_W+40 or sy < -40 or sy > SC_H+40 then return
+    dim s as single = a.size
+    select case a.species
+        case "lion"
+            ' body
+            circle (sx, sy), s*0.95, a.col, , , 0.6, f
+            ' legs
+            line (sx-s*0.5, sy+s*0.4)-(sx-s*0.5, sy+s*1.2), a.col
+            line (sx+s*0.1, sy+s*0.4)-(sx+s*0.1, sy+s*1.2), a.col
+            line (sx+s*0.5, sy+s*0.4)-(sx+s*0.5, sy+s*1.2), a.col
+            ' tail
+            line (sx-s*0.8, sy)-(sx-s*1.5, sy-s*0.3), a.col
+            circle (sx-s*1.5, sy-s*0.3), s*0.18, rgb(60,40,20), , , , f
+            ' mane
+            circle (sx+s*0.6, sy-s*0.3), s*1.05, rgb(120,70,20), , , , f
+            ' head
+            circle (sx+s*0.6, sy-s*0.3), s*0.55, a.col, , , , f
+            ' face
+            circle (sx+s*0.85, sy-s*0.25), s*0.08, rgb(40,30,20), , , , f
+            circle (sx+s*0.85, sy-s*0.45), s*0.08, rgb(40,30,20), , , , f
+        case "cheetah"
+            circle (sx, sy), s*0.85, a.col, , , 0.55, f
+            line (sx-s*0.4, sy+s*0.35)-(sx-s*0.4, sy+s*1.1), a.col
+            line (sx+s*0.2, sy+s*0.35)-(sx+s*0.2, sy+s*1.1), a.col
+            line (sx+s*0.6, sy+s*0.35)-(sx+s*0.6, sy+s*1.1), a.col
+            circle (sx+s*0.75, sy-s*0.2), s*0.4, a.col, , , , f
+            ' spots
+            for t as integer = 0 to 6
+                dim ax as single = sx + (t-3)*s*0.28
+                dim ay as single = sy + (t mod 3 -1)*s*0.2
+                circle (ax, ay), 2.2, rgb(40,30,20), , , , f
+            next
+            ' tail
+            line (sx-s*0.7, sy)-(sx-s*1.4, sy-s*0.5), rgb(60,40,20)
+            for t as integer = 0 to 3
+                circle (sx-s*1.0-t*s*0.12, sy-s*0.35-t*s*0.05), 1.6, rgb(40,30,20), , , , f
+            next
+            ' ears
+            line (sx+s*0.6, sy-s*0.45)-(sx+s*0.75, sy-s*0.85), a.col
+            line (sx+s*0.9, sy-s*0.45)-(sx+s*0.75, sy-s*0.85), a.col
+        case "hyena"
+            circle (sx, sy), s*0.9, a.col, , , 0.5, f
+            line (sx-s*0.5, sy+s*0.4)-(sx-s*0.5, sy+s*1.1), a.col
+            line (sx, sy+s*0.45)-(sx, sy+s*1.1), a.col
+            line (sx+s*0.5, sy+s*0.4)-(sx+s*0.5, sy+s*1.1), a.col
+            circle (sx+s*0.7, sy-s*0.25), s*0.42, a.col, , , , f
+            ' sloped back
+            line (sx-s*0.8, sy-s*0.5)-(sx+s*0.7, sy-s*0.1), rgb(90,70,50)
+            ' ears
+            circle (sx+s*0.5, sy-s*0.8), s*0.18, a.col, , , , f
+            circle (sx+s*0.85, sy-s*0.75), s*0.18, a.col, , , , f
+            ' spots
+            circle (sx-s*0.2, sy-0.1*s), 2.5, rgb(60,40,20), , , , f
+            circle (sx+s*0.1, sy+0.2*s), 2.5, rgb(60,40,20), , , , f
+        case "gazelle"
+            circle (sx, sy), s*0.7, a.col, , , 0.5, f
+            line (sx-s*0.25, sy+s*0.4)-(sx-s*0.25, sy+s*1.3), a.col
+            line (sx+s*0.25, sy+s*0.4)-(sx+s*0.25, sy+s*1.3), a.col
+            circle (sx+s*0.55, sy-s*0.35), s*0.32, a.col, , , , f
+            ' horns
+            line (sx+s*0.5, sy-s*0.6)-(sx+s*0.35, sy-s*1.5), rgb(70,50,30)
+            line (sx+s*0.6, sy-s*0.6)-(sx+s*0.75, sy-s*1.5), rgb(70,50,30)
+            ' white belly
+            circle (sx, sy+s*0.15), s*0.45, rgb(240,230,210), , , 0.4, f
+            ' tail
+            line (sx-s*0.6, sy)-(sx-s*0.85, sy-s*0.1), a.col
+        case "zebra"
+            circle (sx, sy), s*0.85, rgb(240,240,240), , , 0.55, f
+            line (sx-s*0.3, sy+s*0.4)-(sx-s*0.3, sy+s*1.2), rgb(240,240,240)
+            line (sx+s*0.2, sy+s*0.4)-(sx+s*0.2, sy+s*1.2), rgb(240,240,240)
+            line (sx+s*0.6, sy+s*0.4)-(sx+s*0.6, sy+s*1.2), rgb(240,240,240)
+            circle (sx+s*0.7, sy-s*0.3), s*0.4, rgb(240,240,240), , , , f
+            ' stripes
+            for t as integer = -3 to 3
+                line (sx+t*s*0.22, sy-s*0.9)-(sx+t*s*0.22, sy+s*0.9), rgb(30,30,30)
+            next
+            ' mane
+            for t as integer = 0 to 4
+                line (sx+s*0.4+t*s*0.08, sy-s*0.6-t*s*0.12)-(sx+s*0.4+t*s*0.08, sy-s*1.2-t*s*0.12), rgb(30,30,30)
+            next
+        case "wildebeest"
+            circle (sx, sy), s*0.9, a.col, , , 0.5, f
+            line (sx-s*0.35, sy+s*0.4)-(sx-s*0.35, sy+s*1.2), a.col
+            line (sx+s*0.2, sy+s*0.45)-(sx+s*0.2, sy+s*1.2), a.col
+            line (sx+s*0.55, sy+s*0.4)-(sx+s*0.55, sy+s*1.2), a.col
+            circle (sx+s*0.7, sy-s*0.25), s*0.45, a.col, , , , f
+            ' horns
+            line (sx+s*0.4, sy-s*0.6)-(sx+s*0.15, sy-s*1.4), rgb(80,60,30)
+            line (sx+s*0.9, sy-s*0.6)-(sx+s*1.2, sy-s*1.4), rgb(80,60,30)
+            ' beard
+            for t as integer = 0 to 3
+                line (sx+s*0.6, sy+t*s*0.15)-(sx+s*0.6, sy+s*0.4+t*s*0.12), rgb(60,40,20)
+            next
+            ' shaggy front
+            circle (sx+s*0.7, sy+s*0.1), s*0.25, rgb(70,50,30), , , , f
+        case "elephant"
+            circle (sx, sy), s*1.05, a.col, , , 0.65, f
+            line (sx-s*0.3, sy+s*0.6)-(sx-s*0.3, sy+s*1.4), a.col
+            line (sx+s*0.3, sy+s*0.6)-(sx+s*0.3, sy+s*1.4), a.col
+            ' head
+            circle (sx+s*0.85, sy-s*0.2), s*0.6, a.col, , , , f
+            ' trunk
+            line (sx+s*1.1, sy+s*0.1)-(sx+s*1.35, sy+s*0.9), a.col
+            line (sx+s*1.15, sy+s*0.1)-(sx+s*1.4, sy+s*0.9), a.col
+            circle (sx+s*1.38, sy+s*0.95), s*0.18, a.col, , , , f
+            ' ears
+            circle (sx+s*0.55, sy-s*0.7), s*0.55, a.col, , , 0.7, f
+            circle (sx+s*1.1, sy-s*0.7), s*0.55, a.col, , , 0.7, f
+            ' tusks
+            line (sx+s*1.0, sy+s*0.2)-(sx+s*1.25, sy+s*0.45), rgb(245,245,230)
+            line (sx+s*1.0, sy+s*0.3)-(sx+s*1.2, sy+s*0.55), rgb(245,245,230)
+            ' tail
+            line (sx-s*0.9, sy)-(sx-s*1.3, sy-s*0.2), a.col
+        case "giraffe"
+            circle (sx, sy), s*0.85, a.col, , , 0.55, f
+            line (sx-s*0.25, sy+s*0.5)-(sx-s*0.25, sy+s*1.5), a.col
+            line (sx+s*0.25, sy+s*0.5)-(sx+s*0.25, sy+s*1.5), a.col
+            ' neck
+            line (sx+s*0.35, sy-s*0.4)-(sx+s*0.3, sy-s*2.4), a.col
+            line (sx+s*0.65, sy-s*0.4)-(sx+s*0.6, sy-s*2.4), a.col
+            circle (sx+s*0.45, sy-s*2.6), s*0.4, a.col, , , , f
+            ' spots
+            circle (sx-s*0.1, sy), 3.5, rgb(120,80,40), , , , f
+            circle (sx+s*0.2, sy+0.2*s), 3.5, rgb(120,80,40), , , , f
+            circle (sx+s*0.45, sy-s*1.2), 3.5, rgb(120,80,40), , , , f
+            circle (sx+s*0.5, sy-s*1.9), 3.5, rgb(120,80,40), , , , f
+            ' horns (ossicones)
+            line (sx+s*0.35, sy-s*2.9)-(sx+s*0.3, sy-s*3.2), rgb(90,60,30)
+            circle (sx+s*0.3, sy-s*3.25), s*0.12, rgb(90,60,30), , , , f
+            line (sx+s*0.55, sy-s*2.9)-(sx+s*0.6, sy-s*3.2), rgb(90,60,30)
+            circle (sx+s*0.6, sy-s*3.25), s*0.12, rgb(90,60,30), , , , f
+            ' tail
+            line (sx-s*0.7, sy)-(sx-s*1.0, sy-s*0.5), a.col
+            circle (sx-s*1.0, sy-s*0.5), s*0.15, rgb(60,40,20), , , , f
+    end select
+    circle (sx, sy), s*1.08, rgb(0,0,0), , , 0.6
+    if a.attackedTimer > 0 then
+        line (sx-s*1.2, sy-s*1.2)-(sx+s*1.2, sy+s*1.2), rgb(220,40,40)
+        line (sx-s*1.2, sy+s*1.2)-(sx+s*1.2, sy-s*1.2), rgb(220,40,40)
+    end if
+    circle (sx, sy), s*1.08, rgb(0,0,0), , , 0.6
+    if a.attackedTimer > 0 then
+        line (sx-s*1.2, sy-s*1.2)-(sx+s*1.2, sy+s*1.2), rgb(220,40,40)
+        line (sx-s*1.2, sy+s*1.2)-(sx+s*1.2, sy-s*1.2), rgb(220,40,40)
+    end if
+end sub
+
+sub draw_world(camX as single, camY as single)
+    line (0,0)-(SC_W-1,SC_H-1), rgb(190,170,110), bf
+    ' savannah grass patches in world space
+    for i as integer = 0 to 90
+        dim wx as single = (i*997.0) mod WORLD_W
+        dim wy as single = (i*1319.0) mod WORLD_H
+        dim sx as integer, sy as integer
+        world_to_screen wx, wy, camX, camY, sx, sy
+        if sx > -40 and sx < SC_W+40 and sy > -40 and sy < SC_H+40 then
+            circle (sx, sy), 18 + (i mod 6)*3, rgb(150,135,70), , , , f
+            circle (sx+4, sy+2), 12 + (i mod 4)*2, rgb(170,150,85), , , , f
+        end if
+    next
+    ' scattered acacia trees
+    for i as integer = 0 to 18
+        dim wx as single = (i*2137.0 + 300) mod (WORLD_W-200) + 100
+        dim wy as single = (i*1733.0 + 200) mod (WORLD_H-200) + 100
+        dim sx as integer, sy as integer
+        world_to_screen wx, wy, camX, camY, sx, sy
+        if sx > -30 and sx < SC_W+30 and sy > -40 and sy < SC_H+40 then
+            line (sx, sy)-(sx, sy-28), rgb(110,80,40), bf
+            circle (sx, sy-34), 16, rgb(90,120,60), , , , f
+            circle (sx-8, sy-28), 12, rgb(70,100,50), , , , f
+            circle (sx+8, sy-28), 12, rgb(70,100,50), , , , f
+        end if
+    next
+
+    for p as integer = 0 to nPonds-1
+        dim sx as integer, sy as integer
+        world_to_screen ponds(p).x, ponds(p).y, camX, camY, sx, sy
+        if sx > -120 and sx < SC_W+120 and sy > -120 and sy < SC_H+120 then
+            circle (sx, sy), ponds(p).r, rgb(40,90,170), , , , f
+            circle (sx, sy), ponds(p).r, rgb(80,130,200)
+            circle (sx - ponds(p).r*0.3, sy - ponds(p).r*0.3), ponds(p).r*0.25, rgb(120,170,220), , , , f
+        end if
+    next
+
+    for f as integer = 0 to nFoods-1
+        if foods(f).active = 0 then continue for
+        dim sx as integer, sy as integer
+        world_to_screen foods(f).x, foods(f).y, camX, camY, sx, sy
+        if sx >= 0 and sx <= SC_W and sy >= 0 and sy <= SC_H then
+            circle (sx, sy), 3, rgb(40,160,60), , , , f
+            circle (sx, sy-2), 2, rgb(80,200,90), , , , f
+        end if
+    next
+
+    ' corpses
+    for c as integer = 0 to MAX_CORPSES-1
+        if corpses(c).active=0 then continue for
+        dim sx as integer, sy as integer
+        world_to_screen corpses(c).x, corpses(c).y, camX, camY, sx, sy
+        if sx > -20 and sx < SC_W+20 and sy > -20 and sy < SC_H+20 then
+            circle (sx, sy), 8, rgb(90,40,40), , , , f
+            circle (sx, sy), 8, rgb(60,20,20)
+        end if
+    next
+    for i as integer = 0 to MAX_ANIMALS-1
+        if animals(i).active=0 then continue for
+        draw_animal animals(i), camX, camY
+    next
+    if selectedAnimal >= 0 and animals(selectedAnimal).active=1 then
+        dim sx as integer, sy as integer
+        world_to_screen animals(selectedAnimal).x, animals(selectedAnimal).y, camX, camY, sx, sy
+        circle (sx, sy), animals(selectedAnimal).size+8, rgb(255,220,60)
+        circle (sx, sy), animals(selectedAnimal).size+9, rgb(255,220,60)
+    end if
+end sub
+
+' ---------- main ----------
+randomize timer
+screenres SC_W, SC_H, 32
+windowtitle "Animal Tank - Raon-1-nano"
+
+init_world()
+
+screenlock
+cls
+draw string (40, 40), "Animal Tank"
+draw string (40, 70), "Loading model..."
+screenunlock
+
+llm_init()
+
+for ai as integer = 1 to 10
+    if command(ai) = "--log" or command(ai) = "-log" then logging = 1
+    if command(ai) = "--demo" then demoMode = 1
+next
+
+dim speciesOrder(0 to 7) as string = {"lion","cheetah","hyena","gazelle","zebra","wildebeest","elephant","giraffe"}
+dim lastViewed(0 to 7) as integer
+for ki as integer = 0 to 7
+    lastViewed(ki) = -1
+next
+dim keyWas(1 to 8) as integer
+dim prevMouseButtons as integer = 0
+dim camX as single = WORLD_W/2 - SC_W/2
+dim camY as single = WORLD_H/2 - SC_H/2
+dim demoStart as double = timer
+dim demoTimer as double = 0
+dim demoIndex as integer = 0
+dim lastTime as double = timer
+dim decideIdx as integer = 0
+dim lastAttempt as double = timer
+
+do
+    dim dt as single = timer - lastTime
+    if dt > 0.1 then dt = 0.1
+    lastTime = timer
+
+    if multikey(FB.SC_LEFT) or multikey(FB.SC_RIGHT) or multikey(FB.SC_UP) or multikey(FB.SC_DOWN) then selectedAnimal = -1
+    if multikey(FB.SC_LEFT) then camX -= 260*dt
+    if multikey(FB.SC_RIGHT) then camX += 260*dt
+    if multikey(FB.SC_UP) then camY -= 260*dt
+    if multikey(FB.SC_DOWN) then camY += 260*dt
+    if camX < 0 then camX = 0
+    if camY < 0 then camY = 0
+    if camX > WORLD_W - SC_W then camX = WORLD_W - SC_W
+    if camY > WORLD_H - SC_H then camY = WORLD_H - SC_H
+
+    ' mouse click selection
+    dim mx as integer, my as integer, mbuttons as integer
+    getmouse mx, my, , mbuttons
+    if (mbuttons and 1) and (prevMouseButtons and 1)=0 then
+        if mx >= 0 and mx < SC_W and my >= 0 and my < SC_H then
+            dim wx as single = camX + mx
+            dim wy as single = camY + my
+            dim best as integer = -1
+            dim bestD as single = 9999
+            for j as integer = 0 to MAX_ANIMALS-1
+                if animals(j).active=0 then continue for
+                dim d as single = dist(wx, wy, animals(j).x, animals(j).y)
+                if d < bestD and d < animals(j).size + 10 then
+                    bestD = d
+                    best = j
+                end if
+            next
+            selectedAnimal = best
+        end if
+    end if
+    prevMouseButtons = mbuttons
+
+    ' demo mode auto-cycle
+    if demoMode = 1 then
+        if timer - demoStart < 2 then
+            camX = WORLD_W/2 - SC_W/2
+            camY = WORLD_H/2 - SC_H/2
+        else
+            if demoTimer = 0 then
+                demoTimer = timer
+                demoIndex = 0
+            elseif timer - demoTimer >= 10 then
+                demoTimer = timer
+                demoIndex = (demoIndex + 1) mod 8
+            end if
+            ' select first active of species demoIndex
+            dim spName as string = speciesOrder(demoIndex)
+            for j as integer = 0 to MAX_ANIMALS-1
+                if animals(j).active=1 and animals(j).species=spName then
+                    selectedAnimal = j
+                    exit for
+                end if
+            next
+        end if
+    end if
+
+    ' follow selected
+    if selectedAnimal >= 0 then
+        if animals(selectedAnimal).active=0 then
+            selectedAnimal = -1
+        else
+            camX = animals(selectedAnimal).x - SC_W/2
+            camY = animals(selectedAnimal).y - SC_H/2
+            if camX < 0 then camX = 0
+            if camY < 0 then camY = 0
+            if camX > WORLD_W - SC_W then camX = WORLD_W - SC_W
+            if camY > WORLD_H - SC_H then camY = WORLD_H - SC_H
+        end if
+    end if
+
+    ' number keys: center on species (via inkey for discrete presses)
+    dim k as string = inkey
+    if k >= "1" and k <= "8" then
+        dim ki as integer = asc(k) - asc("1") + 1
+        dim spName as string = speciesOrder(ki-1)
+        dim best as integer = -1
+        if lastViewed(ki-1) >= 0 then
+            for j as integer = lastViewed(ki-1)+1 to MAX_ANIMALS-1
+                if animals(j).active=1 and animals(j).species=spName then
+                    best=j
+                    exit for
+                end if
+            next
+        end if
+        if best=-1 then
+            for j as integer = 0 to MAX_ANIMALS-1
+                if animals(j).active=1 and animals(j).species=spName then
+                    best=j
+                    exit for
+                end if
+            next
+        end if
+        if best>=0 then
+            lastViewed(ki-1)=best
+            selectedAnimal = best
+        end if
+    end if
+
+    for i as integer = 0 to MAX_ANIMALS-1
+        if animals(i).active=0 then continue for
+        ' starvation/thirst damage
+        if animals(i).hunger <= 0 or animals(i).thirst <= 0 then
+            animals(i).hp -= dt*6
+        end if
+        if animals(i).hp <= 0 then
+            ' create corpse
+            for c as integer = 0 to MAX_CORPSES-1
+                if corpses(c).active=0 then
+                    corpses(c).active=1
+                    corpses(c).x=animals(i).x
+                    corpses(c).y=animals(i).y
+                    corpses(c).food=4
+                    corpses(c).expire=timer+15
+                    exit for
+                end if
+            next
+            animals(i).active=0
+            continue for
+        end if
+        ' attacked behavior
+        if animals(i).attackedTimer > 0 then
+            if animals(i).attacker >= 0 and (animals(i).attacker >= MAX_ANIMALS or animals(animals(i).attacker).active=0) then
+                animals(i).attackedTimer = 0
+                animals(i).attacker = -1
+            else
+                animals(i).attackedTimer -= dt
+            end if
+            dim isFighter as integer = 0
+            if animals(i).species="elephant" or animals(i).species="giraffe" or animals(i).species="wildebeest" then isFighter=1
+            if isFighter=1 then
+                ' fight back: damage attacker
+                dim atk as integer = animals(i).attacker
+                if atk>=0 and atk<MAX_ANIMALS and animals(atk).active=1 then
+                    if dist(animals(i).x, animals(i).y, animals(atk).x, animals(atk).y) < 60 then
+                        animals(atk).hp -= dt*18
+                        if animals(atk).hp <= 0 then
+                            for c as integer = 0 to MAX_CORPSES-1
+                                if corpses(c).active=0 then
+                                    corpses(c).active=1
+                                    corpses(c).x=animals(atk).x
+                                    corpses(c).y=animals(atk).y
+                                    corpses(c).food=4
+                                    corpses(c).expire=timer+15
+                                    exit for
+                                end if
+                            next
+                            animals(atk).active=0
+                        end if
+                    end if
+                end if
+            else
+                ' flee from attacker
+                dim atk as integer = animals(i).attacker
+                if atk>=0 and atk<MAX_ANIMALS and animals(atk).active=1 and animals(i).moveTimer <= 0 then
+                    dim dx as single = animals(atk).x - animals(i).x
+                    dim dy as single = animals(atk).y - animals(i).y
+                    apply_direction(i, dir_from_delta(-dx, -dy))
+                    animals(i).moveTimer = 0.6
+                end if
+            end if
+        end if
+        if animals(i).goal = "drink" and animals(i).thirst > 80 then animals(i).goal = ""
+        if animals(i).goal = "eat" and animals(i).hunger > 80 then animals(i).goal = ""
+        if animals(i).goal = "rest" and animals(i).energy > 90 then animals(i).goal = ""
+        if animals(i).state = "sleep" then
+            animals(i).sleepTimer -= dt
+            animals(i).energy += dt*8
+            if animals(i).energy > 100 then animals(i).energy = 100
+            if animals(i).sleepTimer <= 0 then
+                animals(i).state = "idle"
+                animals(i).energy = 100
+                animals(i).lastAction = "WAKE"
+                animals(i).actionTime = timer
+            end if
+            ' still update bounds (none) and continue
+            continue for
+        end if
+        animals(i).energy -= dt*0.2
+        if animals(i).energy < 0 then animals(i).energy = 0
+        if animals(i).energy <= 0 then
+            animals(i).state = "sleep"
+            animals(i).sleepTimer = 5 + rnd*3
+            animals(i).vx = 0
+            animals(i).vy = 0
+            animals(i).moveTimer = 0
+            animals(i).lastAction = "SLEEPING"
+            animals(i).actionTime = timer
+            continue for
+        end if
+animals(i).hunger -= dt*0.3
+        animals(i).thirst -= dt*0.4
+        if animals(i).hunger < 0 then animals(i).hunger = 0
+        if animals(i).thirst < 0 then animals(i).thirst = 0
+        if animals(i).hunger > 100 then animals(i).hunger = 100
+        if animals(i).thirst > 100 then animals(i).thirst = 100
+
+        if animals(i).moveTimer > 0 then
+            animals(i).moveTimer -= dt
+            animals(i).x += animals(i).vx * dt
+            animals(i).y += animals(i).vy * dt
+            ' gentle flocking for prey toward nearest same species (only if no predator nearby)
+            dim predatorNear as integer = 0
+            for j as integer = 0 to MAX_ANIMALS-1
+                if animals(j).active=0 then continue for
+                if not (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena") then continue for
+                if dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y) < VISION*1.5 then
+                    predatorNear = 1
+                    exit for
+                end if
+            next
+            if is_predator(animals(i).species)=0 and predatorNear=0 then
+                dim bestD as single = 9999
+                dim bx as single = 0, by as single = 0
+                for j as integer = 0 to MAX_ANIMALS-1
+                    if j=i or animals(j).active=0 then continue for
+                    if animals(j).species <> animals(i).species then continue for
+                    dim d as single = dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y)
+                    if d > 0 and d < bestD and d < 160 then
+                        bestD = d
+                        bx = animals(j).x
+                        by = animals(j).y
+                    end if
+                next
+                if bestD < 9999 then
+                    animals(i).x += (bx - animals(i).x) * 0.0015
+                    animals(i).y += (by - animals(i).y) * 0.0015
+                end if
+            end if
+            ' emergency override: if predator/prey very close, stop and let flee/chase handle next frame
+            if is_predator(animals(i).species)=0 then
+                for j as integer = 0 to MAX_ANIMALS-1
+                    if animals(j).active=0 then continue for
+                    if not (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena") then continue for
+                    if dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y) < VISION*0.7 then
+                        animals(i).moveTimer = 0
+                        animals(i).vx = 0
+                        animals(i).vy = 0
+                        exit for
+                    end if
+                next
+            else
+                if animals(i).hunger < 40 then
+                    for j as integer = 0 to MAX_ANIMALS-1
+                        if animals(j).active=0 then continue for
+                        if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" then continue for
+                        if dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y) < VISION*0.7 then
+                            animals(i).moveTimer = 0
+                            animals(i).vx = 0
+                            animals(i).vy = 0
+                            exit for
+                        end if
+                    next
+                end if
+            end if
+            if animals(i).moveTimer <= 0 then
+                animals(i).vx = 0
+                animals(i).vy = 0
+                if animals(i).state = "move" then animals(i).state = "idle"
+                if animals(i).state = "eat" or animals(i).state = "drink" or animals(i).state = "rest" then animals(i).state = "idle"
+            end if
+        else
+            ' predator chase (only when hungry)
+            if (animals(i).species="lion" or animals(i).species="cheetah" or animals(i).species="hyena") and animals(i).hunger < 40 then
+                dim bestD as single = 9999
+                dim tx as single = 0, ty as single = 0
+                for j as integer = 0 to MAX_ANIMALS-1
+                    if animals(j).active=0 then continue for
+                    if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" then continue for
+                    dim d as single = dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y)
+                    if d < bestD and d < VISION*1.5 then
+                        bestD = d
+                        tx = animals(j).x
+                        ty = animals(j).y
+                    end if
+                next
+                if bestD < 9999 then
+                    dim dx as single = tx - animals(i).x
+                    dim dy as single = ty - animals(i).y
+                    apply_direction(i, dir_from_delta(dx, dy))
+                    animals(i).moveTimer = 0.9
+                end if
+            else
+                ' prey flee from nearest predator
+                dim bestD as single = 9999
+                dim tx as single = 0, ty as single = 0
+                for j as integer = 0 to MAX_ANIMALS-1
+                    if animals(j).active=0 then continue for
+                    if not (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena") then continue for
+                    dim d as single = dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y)
+                    if d < bestD and d < VISION*1.2 then
+                        bestD = d
+                        tx = animals(j).x
+                        ty = animals(j).y
+                    end if
+                next
+                if bestD < 9999 then
+                    dim dx as single = tx - animals(i).x
+                    dim dy as single = ty - animals(i).y
+                    apply_direction(i, dir_from_delta(-dx, -dy))
+                    animals(i).moveTimer = 0.9
+                end if
+            end if
+            ' edge escape
+            if animals(i).moveTimer <= 0 then
+                if animals(i).x > WORLD_W - 200 then
+                    apply_direction(i, "W")
+                    animals(i).lastAction = "MOVE W"
+                    animals(i).actionTime = timer
+                    animals(i).moveTimer = 0.7
+                elseif animals(i).x < 200 then
+                    apply_direction(i, "E")
+                    animals(i).lastAction = "MOVE E"
+                    animals(i).actionTime = timer
+                    animals(i).moveTimer = 0.7
+                elseif animals(i).y > WORLD_H - 200 then
+                    apply_direction(i, "N")
+                    animals(i).lastAction = "MOVE N"
+                    animals(i).actionTime = timer
+                    animals(i).moveTimer = 0.7
+                elseif animals(i).y < 200 then
+                    apply_direction(i, "S")
+                    animals(i).lastAction = "MOVE S"
+                    animals(i).actionTime = timer
+                    animals(i).moveTimer = 0.7
+                end if
+            end if
+            ' goal-based steering
+            if animals(i).moveTimer <= 0 and animals(i).goal <> "" then
+                if animals(i).goal = "drink" then
+                    ' move toward nearest water
+                    dim bestD as single = 9999
+                    dim tx as single = 0, ty as single = 0
+                    for p as integer = 0 to nPonds-1
+                        dim d as single = dist(animals(i).x, animals(i).y, ponds(p).x, ponds(p).y)
+                        if d < bestD then
+                            bestD = d
+                            tx = ponds(p).x
+                            ty = ponds(p).y
+                        end if
+                    next
+                    if bestD > ponds(0).r + 5 then
+                        dim dx as single = tx - animals(i).x
+                        dim dy as single = ty - animals(i).y
+                        apply_direction(i, dir_from_delta(dx, dy))
+                        animals(i).moveTimer = 0.9
+                    end if
+                elseif animals(i).goal = "eat" then
+                    if is_predator(animals(i).species)=1 then
+                        ' move toward nearest prey
+                        dim bestD as single = 9999
+                        dim tx as single = 0, ty as single = 0
+                        for j as integer = 0 to MAX_ANIMALS-1
+                            if animals(j).active=0 then continue for
+                            if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" then continue for
+                            dim d as single = dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y)
+                            if d < bestD then
+                                bestD = d
+                                tx = animals(j).x
+                                ty = animals(j).y
+                            end if
+                        next
+                        if bestD < 9999 then
+                            dim dx as single = tx - animals(i).x
+                            dim dy as single = ty - animals(i).y
+                            apply_direction(i, dir_from_delta(dx, dy))
+                            animals(i).moveTimer = 0.9
+                        end if
+                    else
+                        ' move toward nearest food
+                        dim bestD as single = 9999
+                        dim tx as single = 0, ty as single = 0
+                        for f as integer = 0 to nFoods-1
+                            if foods(f).active=0 then continue for
+                            dim d as single = dist(animals(i).x, animals(i).y, foods(f).x, foods(f).y)
+                            if d < bestD then
+                                bestD = d
+                                tx = foods(f).x
+                                ty = foods(f).y
+                            end if
+                        next
+                        if bestD < 9999 then
+                            dim dx as single = tx - animals(i).x
+                            dim dy as single = ty - animals(i).y
+                            apply_direction(i, dir_from_delta(dx, dy))
+                            animals(i).moveTimer = 0.9
+                        end if
+                    end if
+                elseif animals(i).goal = "flee" then
+                    ' move away from nearest predator
+                    dim bestD as single = 9999
+                    dim tx as single = 0, ty as single = 0
+                    for j as integer = 0 to MAX_ANIMALS-1
+                        if animals(j).active=0 then continue for
+                        if not (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena") then continue for
+                        dim d as single = dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y)
+                        if d < bestD then
+                            bestD = d
+                            tx = animals(j).x
+                            ty = animals(j).y
+                        end if
+                    next
+                    if bestD < 9999 then
+                        dim dx as single = tx - animals(i).x
+                        dim dy as single = ty - animals(i).y
+                        apply_direction(i, dir_from_delta(-dx, -dy))
+                        animals(i).moveTimer = 0.9
+                    end if
+                end if
+            end if
+            ' idle wandering
+            if animals(i).state = "idle" and animals(i).moveTimer <= 0 and rnd < 0.05 then
+                dim dirs(0 to 7) as string = {"N","S","E","W","NE","NW","SE","SW"}
+                dim wdir as string = dirs(int(rnd*8))
+                apply_direction(i, wdir)
+                animals(i).lastAction = "MOVE " & wdir
+                animals(i).actionTime = timer
+                animals(i).moveTimer = 0.6 + rnd*0.6
+            end if
+        end if
+
+        ' auto-actions when very close
+        if animals(i).state <> "sleep" then
+            if is_predator(animals(i).species)=1 then
+                if animals(i).hunger < 50 then
+                    for j as integer = 0 to MAX_ANIMALS-1
+                        if animals(j).active=0 then continue for
+                        if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" then continue for
+                        if dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y) < 32 then
+                            animals(j).hp -= dt*20
+                        animals(j).attackedTimer = 1.2
+                        animals(j).attacker = i
+                            if animals(j).hp <= 0 then
+                                for c as integer = 0 to MAX_CORPSES-1
+                                    if corpses(c).active=0 then
+                                        corpses(c).active=1
+                                        corpses(c).x=animals(j).x
+                                        corpses(c).y=animals(j).y
+                                        corpses(c).food=5
+                                        corpses(c).expire=timer+15
+                                        exit for
+                                    end if
+                                next
+                                animals(j).active=0
+                                animals(i).hunger = animals(i).hunger + 35
+                                if animals(i).hunger > 100 then animals(i).hunger = 100
+                                animals(i).lastAction = "EAT"
+                                animals(i).actionTime = timer
+                                log_msg("AUTO-EAT kill by " & animals(i).species & " prey hp 0")
+                            end if
+                            exit for
+                        end if
+                    next
+                end if
+            else
+                ' prey auto-eat grass
+                if animals(i).hunger < 50 then
+                    for f as integer = 0 to nFoods-1
+                        if foods(f).active=0 then continue for
+                        if dist(animals(i).x, animals(i).y, foods(f).x, foods(f).y) < 20 then
+                            foods(f).active=0
+                            foods(f).regen=timer+8+rnd*6
+                            animals(i).hunger = animals(i).hunger + 35
+                            if animals(i).hunger > 100 then animals(i).hunger = 100
+                            animals(i).lastAction = "EAT"
+                            animals(i).actionTime = timer
+                            animals(i).goal = ""
+                            animals(i).state = "eat"
+                            animals(i).moveTimer = 0.6
+                            animals(i).vx = 0
+                            animals(i).vy = 0
+                            exit for
+                        end if
+                    next
+                end if
+            end if
+            ' auto-drink
+            if animals(i).thirst < 50 then
+                for p as integer = 0 to nPonds-1
+                    if dist(animals(i).x, animals(i).y, ponds(p).x, ponds(p).y) <= ponds(p).r + 2 then
+                        animals(i).thirst = animals(i).thirst + 40
+                        if animals(i).thirst > 100 then animals(i).thirst = 100
+                        animals(i).lastAction = "DRINK"
+                        animals(i).actionTime = timer
+                        animals(i).goal = ""
+                        animals(i).state = "drink"
+                        animals(i).moveTimer = 0.6
+                        animals(i).vx = 0
+                        animals(i).vy = 0
+                        exit for
+                    end if
+                next
+            end if
+        end if
+
+        ' avoid entering water
+        if animals(i).state <> "drink" and animals(i).state <> "sleep" then
+            for p as integer = 0 to nPonds-1
+                if dist(animals(i).x, animals(i).y, ponds(p).x, ponds(p).y) < ponds(p).r then
+                    dim dxw as single = animals(i).x - ponds(p).x
+                    dim dyw as single = animals(i).y - ponds(p).y
+                    apply_direction(i, dir_from_delta(dxw, dyw))
+                    animals(i).moveTimer = 0.5
+                    exit for
+                end if
+            next
+        end if
+
+        if animals(i).x < 20 then
+            animals(i).x = 20
+            if animals(i).vx < 0 then animals(i).vx = 0
+        end if
+        if animals(i).y < 20 then
+            animals(i).y = 20
+            if animals(i).vy < 0 then animals(i).vy = 0
+        end if
+        if animals(i).x > WORLD_W-20 then
+            animals(i).x = WORLD_W-20
+            if animals(i).vx > 0 then animals(i).vx = 0
+        end if
+        if animals(i).y > WORLD_H-20 then
+            animals(i).y = WORLD_H-20
+            if animals(i).vy > 0 then animals(i).vy = 0
+        end if
+    next
+
+    for f as integer = 0 to nFoods-1
+        if foods(f).active = 0 and timer >= foods(f).regen then
+            foods(f).active = 1
+        end if
+    next
+
+    if timer - lastAttempt > 0.05 then
+        lastAttempt = timer
+        for k as integer = 0 to nAnimals-1
+            dim i as integer = (decideIdx + k) mod MAX_ANIMALS
+            if animals(i).active=0 then continue for
+            ' attacked behavior
+        if animals(i).attackedTimer > 0 then
+            if animals(i).attacker >= 0 and (animals(i).attacker >= MAX_ANIMALS or animals(animals(i).attacker).active=0) then
+                animals(i).attackedTimer = 0
+                animals(i).attacker = -1
+            else
+                animals(i).attackedTimer -= dt
+            end if
+            dim isFighter as integer = 0
+            if animals(i).species="elephant" or animals(i).species="giraffe" or animals(i).species="wildebeest" then isFighter=1
+            if isFighter=1 then
+                ' fight back: damage attacker
+                dim atk as integer = animals(i).attacker
+                if atk>=0 and atk<MAX_ANIMALS and animals(atk).active=1 then
+                    if dist(animals(i).x, animals(i).y, animals(atk).x, animals(atk).y) < 60 then
+                        animals(atk).hp -= dt*18
+                        if animals(atk).hp <= 0 then
+                            for c as integer = 0 to MAX_CORPSES-1
+                                if corpses(c).active=0 then
+                                    corpses(c).active=1
+                                    corpses(c).x=animals(atk).x
+                                    corpses(c).y=animals(atk).y
+                                    corpses(c).food=4
+                                    corpses(c).expire=timer+15
+                                    exit for
+                                end if
+                            next
+                            animals(atk).active=0
+                        end if
+                    end if
+                end if
+            else
+                ' flee from attacker
+                dim atk as integer = animals(i).attacker
+                if atk>=0 and atk<MAX_ANIMALS and animals(atk).active=1 and animals(i).moveTimer <= 0 then
+                    dim dx as single = animals(atk).x - animals(i).x
+                    dim dy as single = animals(atk).y - animals(i).y
+                    apply_direction(i, dir_from_delta(-dx, -dy))
+                    animals(i).moveTimer = 0.6
+                end if
+            end if
+        end if
+        if animals(i).state = "sleep" then continue for
+            if animals(i).lastDecide = 0 or (timer - animals(i).lastDecide) >= DECIDE_INTERVAL then
+                decide_animal(i)
+                decideIdx = (i + 1) mod nAnimals
+                exit for
+            end if
+        next
+    end if
+
+    screenlock
+    draw_world camX, camY
+    line (0,0)-(SC_W,22), rgb(0,0,0), bf
+    draw string (8,4), "Arrows pan viewport | Q quit   Animals decide via LLM"
+    draw string (8, SC_H-14), "1 lion 2 cheetah 3 hyena 4 gazelle 5 zebra 6 wildebeest 7 elephant 8 giraffe"
+    screenunlock
+
+    ' overlay for selected animal
+    if selectedAnimal >= 0 and animals(selectedAnimal).active=1 then
+        dim a as Animal = animals(selectedAnimal)
+        line (SC_W-230, 30)-(SC_W-10, 200), rgb(20,20,30), bf
+        line (SC_W-230, 30)-(SC_W-10, 200), rgb(200,200,200), b
+        draw string (SC_W-220, 40), "Selected: " & a.species
+        draw string (SC_W-220, 58), "Fullness: " & str(int(a.hunger)) & "/100"
+        draw string (SC_W-220, 76), "Hydration: " & str(int(a.thirst)) & "/100"
+        draw string (SC_W-220, 94), "Energy: " & str(int(a.energy)) & "/100"
+        draw string (SC_W-220, 112), "HP: " & str(int(a.hp)) & "/100"
+        draw string (SC_W-220, 130), "Goal: " & a.goal
+        draw string (SC_W-220, 148), "State: " & a.state
+        draw string (SC_W-220, 166), "Thought: " & left(a.lastAction, 24)
+        draw string (SC_W-220, 184), "Click empty to deselect"
+    end if
+    sleep 16
+loop until multikey(FB.SC_Q)
+
+llama_sampler_free(g_smp)
+llama_free(g_ctx)
+llama_free_model(g_model)

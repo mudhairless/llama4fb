@@ -1,0 +1,13 @@
+# Build artifacts
+examples/rpg_village
+examples/animal_tank
+*.o
+
+# FreeBASIC stdbool shim (now vendored in inc/, but keep temp out)
+/tmp/
+
+# Large model weights (auto-downloaded by examples)
+examples/models/
+
+# Editor / OS
+.DS_Store
