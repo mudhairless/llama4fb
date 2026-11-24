@@ -408,18 +408,23 @@ sub assign_identity(slot as integer)
             nUsed += 1
         end if
     next
-    ' find first unused pool name
+    ' collect unused pool indices, then pick uniformly at random
     dim chosen as string = ""
+    dim unusedIdx(0 to 31) as integer
+    dim nUnused as integer = 0
     for p as integer = 0 to nPool-1
         dim inUse as integer = 0
         for u as integer = 0 to nUsed-1
             if used(u) = pool(p) then inUse = 1
         next
         if inUse = 0 then
-            chosen = pool(p)
-            exit for
+            unusedIdx(nUnused) = p
+            nUnused += 1
         end if
     next
+    if nUnused > 0 then
+        chosen = pool(unusedIdx(int(rnd*nUnused)))
+    end if
     if chosen = "" then
         ' suffix fallback
         dim baseName as string = pool(int(rnd*nPool))
