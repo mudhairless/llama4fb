@@ -559,8 +559,13 @@ sub spawn_animal(sp as string, bx as single, by as single)
     if animals(slot).y>WORLD_H-20 then animals(slot).y=WORLD_H-20
     animals(slot).vx=0
     animals(slot).vy=0
-    animals(slot).hunger=10
-    animals(slot).thirst=10
+    if sp = "crocodile" then
+        animals(slot).hunger=100
+        animals(slot).thirst=100
+    else
+        animals(slot).hunger=10
+        animals(slot).thirst=10
+    end if
     animals(slot).state="idle"
     animals(slot).moveTimer=0
     animals(slot).lastDecide=timer + rnd*2
