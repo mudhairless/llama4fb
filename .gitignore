@@ -3,6 +3,7 @@ examples/rpg_village
 examples/animal_tank
 examples/*.mp4
 examples/debug_cmd.txt
+examples/animal_tank.log
 *.o
 
 # FreeBASIC stdbool shim (now vendored in inc/, but keep temp out)
