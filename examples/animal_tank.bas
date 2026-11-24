@@ -466,6 +466,14 @@ function is_predator(sp as string) as integer
     return 0
 end function
 
+function damage_mult(sp as string) as single
+    select case sp
+        case "elephant": return 0.25
+        case "giraffe": return 0.75
+    end select
+    return 1.0
+end function
+
 function species_temp(sp as string) as single
     select case sp
         case "elephant": return 0.10
@@ -977,7 +985,7 @@ sub decide_animal(idx as integer)
                     if animals(j).active=0 then continue for
                     if is_predator(animals(j).species)=1 then continue for
                     if dist(animals(idx).x, animals(idx).y, animals(j).x, animals(j).y) < 35 then
-                        animals(j).hp -= 25
+                        animals(j).hp -= 25 * damage_mult(animals(j).species)
                         push_event(j, "you were attacked by a " & animals(idx).species)
                         if animals(j).hp <= 0 then
                             for c as integer = 0 to MAX_CORPSES-1
@@ -1548,7 +1556,7 @@ do
                 dim atk as integer = animals(i).attacker
                 if atk>=0 and atk<MAX_ANIMALS and animals(atk).active=1 then
                     if dist(animals(i).x, animals(i).y, animals(atk).x, animals(atk).y) < 60 then
-                        animals(atk).hp -= dt*18
+                        animals(atk).hp -= dt*18 * damage_mult(animals(atk).species)
                         if animals(atk).hp <= 0 then
                             for c as integer = 0 to MAX_CORPSES-1
                                 if corpses(c).active=0 then
@@ -1829,7 +1837,7 @@ animals(i).hunger -= dt*0.3
                         if animals(j).active=0 then continue for
                         if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" then continue for
                         if dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y) < 32 then
-                            animals(j).hp -= dt*20
+                            animals(j).hp -= dt*20 * damage_mult(animals(j).species)
                         animals(j).attackedTimer = 1.2
                         animals(j).attacker = i
                         push_event(j, "you were attacked by a " & animals(i).species)
@@ -2025,7 +2033,7 @@ animals(i).hunger -= dt*0.3
                 dim atk as integer = animals(i).attacker
                 if atk>=0 and atk<MAX_ANIMALS and animals(atk).active=1 then
                     if dist(animals(i).x, animals(i).y, animals(atk).x, animals(atk).y) < 60 then
-                        animals(atk).hp -= dt*18
+                        animals(atk).hp -= dt*18 * damage_mult(animals(atk).species)
                         if animals(atk).hp <= 0 then
                             for c as integer = 0 to MAX_CORPSES-1
                                 if corpses(c).active=0 then
