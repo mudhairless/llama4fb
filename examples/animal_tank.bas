@@ -250,6 +250,7 @@ function dist(ax as single, ay as single, bx as single, by as single) as single
 end function
 
 declare sub assign_identity(slot as integer)
+declare sub spawn_animal(sp as string, bx as single, by as single)
 
 sub init_world()
     ' one large watering hole
@@ -327,6 +328,8 @@ sub init_world()
         assign_identity(i)
     next
     nAnimals = 14
+    spawn_animal("crocodile", ponds(0).x, ponds(0).y)
+    if nAnimals < 15 then nAnimals = 15
     for i as integer = 0 to MAX_CORPSES-1
         corpses(i).active = 0
     next
@@ -342,6 +345,7 @@ function species_behavior(sp as string) as string
         case "wildebeest": return "You are a wildebeest. You graze in dense herds and move toward water together. You avoid predators and stay with the group."
         case "elephant": return "You are an elephant. You drink deeply at the watering hole and eat plants. You are large and mostly unthreatened; others give you space."
         case "giraffe": return "You are a giraffe. You eat leaves from tall trees and drink carefully at water. You are calm and gentle."
+        case "crocodile": return "You are a crocodile, an ambush predator of the watering hole. You live in the water and almost never leave it. You float quietly near the edge and snap at animals that come close to drink. You do not chase prey across the land; you are slow on land and quick in the water. You always return to the water. You fear nothing in the tank."
     end select
     return "You are an animal."
 end function
@@ -370,6 +374,7 @@ function species_name_pool_str(sp as string) as string
     case "wildebeest": return "Gnu|Kofi|Tamba|Zuri|Jengo|Nia|Bibi|Sefu|Asha|Kito|Amara|Zola|Jabari|Kesi|Eshe|Jelani|Kamaria|Odion|Safara|Taji|Zalika|Dakarai|Penda|Bomani"
     case "elephant": return "Tembo|Nia|Jengo|Zuri|Kofi|Asha|Bibi|Tamba|Sefu|Kesi|Amara|Jabari|Zola|Kito|Eshe|Jelani|Kamaria|Odion|Safara|Taji|Zalika|Dakarai|Penda|Bomani"
     case "giraffe": return "Twiga|Zuri|Kito|Nia|Jengo|Asha|Tamba|Kesi|Sefu|Bibi|Amara|Zola|Jabari|Kofi|Eshe|Jelani|Kamaria|Odion|Safara|Taji|Zalika|Dakarai|Penda|Lulu"
+    case "crocodile": return "Sobek|Snap|Kroko|Jabari|Zuri|Tamba|Kesi|Sefu|Nia|Kito|Asha|Jengo|Zola|Amara|Kofi|Bibi|Eshe|Jelani|Kamaria|Odion|Safara|Taji|Zalika|Dakarai"
     end select
     return ""
 end function
@@ -457,12 +462,13 @@ function species_cap(sp as string) as integer
         case "wildebeest": return 12
         case "elephant": return 5
         case "giraffe": return 5
+        case "crocodile": return 1
     end select
     return 6
 end function
 
 function is_predator(sp as string) as integer
-    if sp="lion" or sp="cheetah" or sp="hyena" then return 1
+    if sp="lion" or sp="cheetah" or sp="hyena" or sp="crocodile" then return 1
     return 0
 end function
 
@@ -484,6 +490,7 @@ function species_temp(sp as string) as single
         case "zebra": return 0.14
         case "cheetah": return 0.14
         case "gazelle": return 0.14
+        case "crocodile": return 0.13
     end select
     return 0.12
 end function
@@ -498,6 +505,7 @@ function species_size(sp as string) as single
         case "wildebeest": return 14
         case "elephant": return 26
         case "giraffe": return 22
+        case "crocodile": return 20
     end select
     return 12
 end function
@@ -512,6 +520,7 @@ function species_color(sp as string) as uinteger
         case "wildebeest": return rgb(90,70,50)
         case "elephant": return rgb(150,150,150)
         case "giraffe": return rgb(200,170,90)
+        case "crocodile": return rgb(70,95,55)
     end select
     return rgb(200,200,200)
 end function
@@ -674,6 +683,21 @@ function build_vision(idx as integer) as string
     for j as integer = 0 to nAnimals-1
         if j = idx then continue for
         if animals(j).active = 0 then continue for
+        ' crocodile is invisible to others while in the water, unless it recently
+        ' attacked this viewer and is very close
+        if animals(j).species = "crocodile" then
+            dim _inw as integer = 0
+            for _p as integer = 0 to nPonds-1
+                if dist(animals(j).x, animals(j).y, ponds(_p).x, ponds(_p).y) < ponds(_p).r then _inw = 1
+            next
+            if _inw = 1 then
+                dim _visible as integer = 0
+                if animals(idx).attackedTimer > 0 and animals(idx).attacker = j then
+                    if dist(animals(idx).x, animals(idx).y, animals(j).x, animals(j).y) < 60 then _visible = 1
+                end if
+                if _visible = 0 then continue for
+            end if
+        end if
         dim d as single = dist(animals(idx).x, animals(idx).y, animals(j).x, animals(j).y)
         if d > VISION then continue for
         dim threat as integer = 0
@@ -813,6 +837,12 @@ sub apply_direction(idx as integer, d as string)
         case "hyena": sp = 90
         case "elephant": sp = 40
         case "giraffe": sp = 50
+        case "crocodile"
+            if dist(animals(idx).x, animals(idx).y, ponds(0).x, ponds(0).y) < ponds(0).r then
+                sp = 100
+            else
+                sp = 30
+            end if
     end select
     dim vx as single = 0, vy as single = 0
     if instr(d,"N")>0 then vy = -sp
@@ -892,11 +922,18 @@ sub decide_animal(idx as integer)
     if memJoined <> "" then
         recentStr = "Recent events: " & memJoined & ". "
     end if
+    dim waterSentence as string
+    if animals(idx).species = "crocodile" then
+        waterSentence = "The water is your home; stay in it or right at its edge. "
+    else
+        waterSentence = "Do not enter the water; drink from the edge. "
+    end if
     usrPrompt = "State: you are " & need_word("fullness", int(animals(idx).hunger)) & " and " & need_word("hydration", int(animals(idx).thirst)) & "; your energy is " & need_word("energy", int(animals(idx).energy)) & " and you are " & need_word("health", int(animals(idx).hp)) & ". (fullness=" & str(int(animals(idx).hunger)) & "/100, hydration=" & str(int(animals(idx).thirst)) & "/100, energy=" & str(int(animals(idx).energy)) & "/100, health=" & str(int(animals(idx).hp)) & "/100) attacked=" & attackedStr & ", in water=" & iif(inWater=1,"yes","no") & ". " & _
         lastResultStr & recentStr & _
         "Current goal: " & curGoal & ". Stick to your current goal until it is done; change goals only if a predator is threatening you, you were attacked, or a need becomes urgent. " & _
         "Touching water: " & iif(touchWater=1,"yes","no") & ". " & _
-        "Do not enter the water; drink from the edge. " & _
+        waterSentence & _
+        iif(animals(idx).species = "crocodile" and inWater = 1, "You are hidden in the water; prey cannot see you. ", "") & _
         "You can see: " & vis & ". " & _
         "Stay in the central area near the watering hole; avoid map edges. " & _
         "Urgency: if you are thirsty or very thirsty, move toward water before anything else; if you are hungry or very hungry, seek food/prey before anything else. if you are badly hurt or near death, get away from predators and stay safe; you recover slowly while you are fed, watered, and not being attacked. " & _
@@ -1293,6 +1330,37 @@ sub draw_animal(a as Animal, camX as single, camY as single)
             ' tail
             line (sx-s*0.7, sy)-(sx-s*1.0, sy-s*0.5), a.col
             circle (sx-s*1.0, sy-s*0.5), s*0.15, rgb(60,40,20), , , , f
+        case "crocodile"
+            ' elongated low body lying horizontally
+            dim _cx as single = sx
+            dim _cy as single = sy
+            ' body (ellipse-ish via circle stretched)
+            circle (_cx, _cy), s*1.6, rgb(70,95,55), , , 0.35, f
+            ' darker back stripe
+            line (_cx-s*1.4, _cy-s*0.1)-(_cx+s*1.4, _cy-s*0.1), rgb(50,75,40)
+            ' tail tapered at -x
+            line (_cx-s*1.5, _cy)-(_cx-s*2.6, _cy), rgb(70,95,55)
+            line (_cx-s*1.5, _cy+s*0.15)-(_cx-s*2.6, _cy), rgb(70,95,55)
+            line (_cx-s*1.5, _cy-s*0.15)-(_cx-s*2.6, _cy), rgb(70,95,55)
+            ' legs (small)
+            line (_cx-s*0.6, _cy+s*0.3)-(_cx-s*0.6, _cy+s*0.7), rgb(60,85,45)
+            line (_cx-s*0.1, _cy+s*0.3)-(_cx-s*0.1, _cy+s*0.7), rgb(60,85,45)
+            line (_cx+s*0.4, _cy+s*0.3)-(_cx+s*0.4, _cy+s*0.7), rgb(60,85,45)
+            line (_cx+s*0.9, _cy+s*0.3)-(_cx+s*0.9, _cy+s*0.7), rgb(60,85,45)
+            ' head at +x end
+            circle (_cx+s*1.7, _cy-s*0.05), s*0.55, rgb(70,95,55), , , 0.6, f
+            ' long snout/jaw
+            line (_cx+s*1.9, _cy)-(_cx+s*2.7, _cy), rgb(60,85,45)
+            line (_cx+s*1.9, _cy+s*0.15)-(_cx+s*2.7, _cy+s*0.05), rgb(60,85,45)
+            ' teeth
+            for t as integer = 0 to 3
+                line (_cx+s*2.0+t*s*0.18, _cy)-(_cx+s*2.0+t*s*0.18, _cy+s*0.12), rgb(230,230,210)
+            next
+            ' eye bumps raised on top of head
+            circle (_cx+s*1.6, _cy-s*0.45), s*0.18, rgb(90,115,65), , , , f
+            circle (_cx+s*1.6, _cy-s*0.45), s*0.1, rgb(30,40,20), , , , f
+            circle (_cx+s*1.95, _cy-s*0.4), s*0.18, rgb(90,115,65), , , , f
+            circle (_cx+s*1.95, _cy-s*0.4), s*0.1, rgb(30,40,20), , , , f
     end select
     circle (sx, sy), s*1.08, rgb(0,0,0), , , 0.6
     if a.attackedTimer > 0 then
@@ -1395,12 +1463,12 @@ for ai as integer = 1 to 10
     if command(ai) = "--demo" then demoMode = 1
 next
 
-dim speciesOrder(0 to 7) as string = {"lion","cheetah","hyena","gazelle","zebra","wildebeest","elephant","giraffe"}
-dim lastViewed(0 to 7) as integer
-for ki as integer = 0 to 7
+dim speciesOrder(0 to 8) as string = {"lion","cheetah","hyena","gazelle","zebra","wildebeest","elephant","giraffe","crocodile"}
+dim lastViewed(0 to 8) as integer
+for ki as integer = 0 to 8
     lastViewed(ki) = -1
 next
-dim keyWas(1 to 8) as integer
+dim keyWas(1 to 9) as integer
 dim prevMouseButtons as integer = 0
 dim camX as single = WORLD_W/2 - SC_W/2
 dim camY as single = WORLD_H/2 - SC_H/2
@@ -1460,7 +1528,7 @@ do
                 demoIndex = 0
             elseif timer - demoTimer >= 10 then
                 demoTimer = timer
-                demoIndex = (demoIndex + 1) mod 8
+                demoIndex = (demoIndex + 1) mod 9
             end if
             ' select first active of species demoIndex
             dim spName as string = speciesOrder(demoIndex)
@@ -1489,7 +1557,7 @@ do
 
     ' number keys: center on species (via inkey for discrete presses)
     dim k as string = inkey
-    if k >= "1" and k <= "8" then
+    if k >= "1" and k <= "9" then
         dim ki as integer = asc(k) - asc("1") + 1
         dim spName as string = speciesOrder(ki-1)
         dim best as integer = -1
@@ -1611,8 +1679,13 @@ do
             animals(i).actionTime = timer
             continue for
         end if
-animals(i).hunger -= dt*0.3
-        animals(i).thirst -= dt*0.4
+        if animals(i).species = "crocodile" then
+            animals(i).hunger -= dt*0.03
+            animals(i).thirst -= dt*0.04
+        else
+            animals(i).hunger -= dt*0.3
+            animals(i).thirst -= dt*0.4
+        end if
         if animals(i).hunger < 0 then animals(i).hunger = 0
         if animals(i).thirst < 0 then animals(i).thirst = 0
         if animals(i).hunger > 100 then animals(i).hunger = 100
@@ -1626,7 +1699,7 @@ animals(i).hunger -= dt*0.3
             dim predatorNear as integer = 0
             for j as integer = 0 to MAX_ANIMALS-1
                 if animals(j).active=0 then continue for
-                if not (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena") then continue for
+                if not (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile") then continue for
                 if dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y) < VISION*1.5 then
                     predatorNear = 1
                     exit for
@@ -1654,7 +1727,7 @@ animals(i).hunger -= dt*0.3
             if is_predator(animals(i).species)=1 and animals(i).hunger < 40 then
                 for j as integer = 0 to MAX_ANIMALS-1
                     if animals(j).active=0 then continue for
-                    if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" then continue for
+                    if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile" then continue for
                     if dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y) < VISION*0.7 then
                         animals(i).moveTimer = 0
                         animals(i).vx = 0
@@ -1671,12 +1744,12 @@ animals(i).hunger -= dt*0.3
             end if
         else
             ' predator chase (only when hungry)
-            if (animals(i).species="lion" or animals(i).species="cheetah" or animals(i).species="hyena") and animals(i).hunger < 40 then
+            if (animals(i).species="lion" or animals(i).species="cheetah" or animals(i).species="hyena" or animals(i).species="crocodile") and animals(i).hunger < 40 then
                 dim bestD as single = 9999
                 dim tx as single = 0, ty as single = 0
                 for j as integer = 0 to MAX_ANIMALS-1
                     if animals(j).active=0 then continue for
-                    if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" then continue for
+                    if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile" then continue for
                     dim d as single = dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y)
                     if d < bestD and d < VISION*1.5 then
                         bestD = d
@@ -1696,7 +1769,7 @@ animals(i).hunger -= dt*0.3
                 dim tx as single = 0, ty as single = 0
                 for j as integer = 0 to MAX_ANIMALS-1
                     if animals(j).active=0 then continue for
-                    if not (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena") then continue for
+                    if not (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile") then continue for
                     dim d as single = dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y)
                     if d < bestD and d < VISION*1.2 then
                         bestD = d
@@ -1762,7 +1835,7 @@ animals(i).hunger -= dt*0.3
                         dim tx as single = 0, ty as single = 0
                         for j as integer = 0 to MAX_ANIMALS-1
                             if animals(j).active=0 then continue for
-                            if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" then continue for
+                            if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile" then continue for
                             dim d as single = dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y)
                             if d < bestD then
                                 bestD = d
@@ -1802,7 +1875,7 @@ animals(i).hunger -= dt*0.3
                     dim tx as single = 0, ty as single = 0
                     for j as integer = 0 to MAX_ANIMALS-1
                         if animals(j).active=0 then continue for
-                        if not (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena") then continue for
+                        if not (animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile") then continue for
                         dim d as single = dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y)
                         if d < bestD then
                             bestD = d
@@ -1835,7 +1908,7 @@ animals(i).hunger -= dt*0.3
                 if animals(i).hunger < 50 then
                     for j as integer = 0 to MAX_ANIMALS-1
                         if animals(j).active=0 then continue for
-                        if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" then continue for
+                        if animals(j).species="lion" or animals(j).species="cheetah" or animals(j).species="hyena" or animals(j).species="crocodile" then continue for
                         if dist(animals(i).x, animals(i).y, animals(j).x, animals(j).y) < 32 then
                             animals(j).hp -= dt*20 * damage_mult(animals(j).species)
                         animals(j).attackedTimer = 1.2
@@ -1905,7 +1978,7 @@ animals(i).hunger -= dt*0.3
         end if
 
         ' avoid entering water
-        if animals(i).state <> "drink" and animals(i).state <> "sleep" then
+        if animals(i).species <> "crocodile" and animals(i).state <> "drink" and animals(i).state <> "sleep" then
             for p as integer = 0 to nPonds-1
                 if dist(animals(i).x, animals(i).y, ponds(p).x, ponds(p).y) < ponds(p).r then
                     dim dxw as single = animals(i).x - ponds(p).x
@@ -1915,6 +1988,16 @@ animals(i).hunger -= dt*0.3
                     exit for
                 end if
             next
+        end if
+
+        ' crocodile leash: return to pond if it wanders too far
+        if animals(i).species = "crocodile" and animals(i).state <> "sleep" then
+            if dist(animals(i).x, animals(i).y, ponds(0).x, ponds(0).y) > ponds(0).r + 60 then
+                dim _ldx as single = ponds(0).x - animals(i).x
+                dim _ldy as single = ponds(0).y - animals(i).y
+                apply_direction(i, dir_from_delta(_ldx, _ldy))
+                animals(i).moveTimer = 0.5
+            end if
         end if
 
         if animals(i).x < 20 then
@@ -2011,6 +2094,11 @@ animals(i).hunger -= dt*0.3
                 next
             end if
         next
+        ' crocodile floor: exactly one, spawns at pond center
+        if count_species("crocodile") = 0 then
+            spawn_animal "crocodile", ponds(0).x, ponds(0).y
+            log_msg("floor: spawned crocodile (was 0)")
+        end if
     end if
 
     if timer - lastAttempt > 0.05 then
@@ -2088,7 +2176,7 @@ animals(i).hunger -= dt*0.3
     draw_world camX, camY
     line (0,0)-(SC_W,22), rgb(0,0,0), bf
     draw string (8,4), "Arrows pan viewport | Q quit   Animals decide via LLM"
-    draw string (8, SC_H-14), "1 lion 2 cheetah 3 hyena 4 gazelle 5 zebra 6 wildebeest 7 elephant 8 giraffe"
+    draw string (8, SC_H-14), "1 lion 2 cheetah 3 hyena 4 gazelle 5 zebra 6 wildebeest 7 elephant 8 giraffe 9 crocodile"
     screenunlock
 
     ' overlay for selected animal
