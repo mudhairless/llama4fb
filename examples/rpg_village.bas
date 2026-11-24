@@ -730,6 +730,31 @@ sub talk_to(idx as integer)
     while inkey <> "": wend
 end sub
 
+sub draw_world(px as integer, py as integer)
+    screenlock
+    line (0,0)-(SC_W-1, SC_H-1), rgb(50,110,50), bf
+    line (0, 300)-(SC_W-1, 340), rgb(180,150,100), bf
+    for hx as integer = 80 to 720 step 180
+        line (hx, 80)-(hx+70, 140), rgb(130,90,60), bf
+        line (hx-5, 70)-(hx+75, 85), rgb(160,60,60), bf
+        line (hx+25, 100)-(hx+45, 140), rgb(60,40,20), bf
+    next
+    for tx as integer = 40 to SC_W-40 step 90
+        circle (tx, 500), 18, rgb(30,90,30), , , , f
+        line (tx-3, 500)-(tx+3, 535), rgb(90,60,30), bf
+    next
+    for i as integer = 0 to nNpc-1
+        line (npcs(i).x-6, npcs(i).y)-(npcs(i).x+6, npcs(i).y+16), npcs(i).col, bf
+        circle (npcs(i).x, npcs(i).y-8), 8, npcs(i).col, , , , f
+        draw string (npcs(i).x-30, npcs(i).y-30), npcs(i).nombre
+    next
+    line (px-6, py)-(px+6, py+16), rgb(255,220,60), bf
+    circle (px, py-8), 8, rgb(255,220,60), , , , f
+    draw string (px-14, py-30), "You"
+    draw string (10, 10), "Arrow keys move, Space talk, J journal, Q quit"
+    screenunlock
+end sub
+
 ' ---------- main ----------
 randomize timer
 screenres SC_W, SC_H, 32
@@ -797,7 +822,18 @@ do
 
     if demoMode = 1 and demoStarted = 0 then
         demoStarted = 1
+        draw_world(px, py)
+        sleep 2000
         for di as integer = 0 to nNpc-1
+            while dist(px, py, npcs(di).x, npcs(di).y) > 40
+                if px < npcs(di).x then px += 4
+                if px > npcs(di).x then px -= 4
+                if py < npcs(di).y then py += 4
+                if py > npcs(di).y then py -= 4
+                draw_world(px, py)
+                sleep 16
+            wend
+            sleep 800
             talk_to(di)
             sleep 2000
         next
