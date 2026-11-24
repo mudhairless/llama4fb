@@ -1104,7 +1104,11 @@ declare function llama_sampler_init_grammar_lazy(byval vocab as const llama_voca
 ' / @param trigger_tokens A list of tokens that will trigger the grammar sampler. Grammar sampler will be fed content starting from the trigger token included.
 declare function llama_sampler_init_grammar_lazy_patterns(byval vocab as const llama_vocab ptr, byval grammar_str as const zstring ptr, byval grammar_root as const zstring ptr, byval trigger_patterns as const zstring ptr ptr, byval num_trigger_patterns as uinteger, byval trigger_tokens as const llama_token ptr, byval num_trigger_tokens as uinteger) as llama_sampler ptr
 ' / NOTE: Avoid using on the full vocabulary as searching for repeated tokens can become slow. For example, apply top-k or top-p sampling first.
-'' TODO: struct llama_sampler * llama_sampler_init_penalties( int32_t n_vocab, int32_t penalty_last_n, [TK_FBCODE ' last n tokens to penalize (0 = disable penalty)] float penalty_repeat, [TK_FBCODE ' must be > 0.0, 1.0 = disabled] float penalty_freq, [TK_FBCODE ' must be finite, 0.0 = disabled] float penalty_present);
+' Manually added: fbfrog emits this declaration as a TODO comment.
+' Signature is the fork's llama.h declaration. If the headers are
+' regenerated with fbfrog this line is lost and the TODO returns;
+' reapply it then.
+declare function llama_sampler_init_penalties(byval n_vocab as long, byval penalty_last_n as long, byval penalty_repeat as single, byval penalty_freq as single, byval penalty_present as single) as llama_sampler ptr
 ' must be finite, 0.0 = disabled
 ' /  @details DRY sampler, designed by p-e-w, as described in: https://github.com/oobabooga/text-generation-webui/pull/5677, porting Koboldcpp implementation authored by pi6am: https://github.com/LostRuins/koboldcpp/pull/982
 '' TODO: struct llama_sampler * llama_sampler_init_dry( const struct llama_vocab * vocab, float dry_multiplier, float dry_base, int32_t dry_allowed_length, int32_t dry_penalty_last_n, [TK_FBCODE ' last n tokens to penalize (0 = disable penalty)] const char ** seq_breakers, size_t num_breakers);

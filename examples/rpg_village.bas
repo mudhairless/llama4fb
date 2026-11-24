@@ -5,10 +5,6 @@
 #include once "fbgfx.bi"
 #include once "llama.bi"
 
-extern "C"
-    declare function llama_sampler_init_penalties(byval n_vocab as long, byval penalty_last_n as long, byval penalty_repeat as single, byval penalty_freq as single, byval penalty_present as single) as llama_sampler ptr
-end extern
-
 const SC_W = 800
 const SC_H = 600
 
