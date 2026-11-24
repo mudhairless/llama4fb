@@ -1749,8 +1749,8 @@ do
                 if animals(i).state = "eat" or animals(i).state = "drink" or animals(i).state = "rest" then animals(i).state = "idle"
             end if
         else
-            ' predator chase (only when hungry)
-            if (animals(i).species="lion" or animals(i).species="cheetah" or animals(i).species="hyena" or animals(i).species="crocodile") and animals(i).hunger < 40 then
+            ' predator chase (only when hungry); crocodile never chases (ambush predator)
+            if (animals(i).species="lion" or animals(i).species="cheetah" or animals(i).species="hyena") and animals(i).hunger < 40 then
                 dim bestD as single = 9999
                 dim tx as single = 0, ty as single = 0
                 for j as integer = 0 to MAX_ANIMALS-1
@@ -1769,7 +1769,7 @@ do
                     apply_direction(i, dir_from_delta(dx, dy))
                     animals(i).moveTimer = 0.9
                 end if
-            else
+            elseif animals(i).species <> "crocodile" then
                 ' prey flee from nearest predator
                 dim bestD as single = 9999
                 dim tx as single = 0, ty as single = 0
@@ -1814,8 +1814,12 @@ do
                     animals(i).moveTimer = 0.7
                 end if
             end if
-            ' goal-based steering
-            if animals(i).moveTimer <= 0 and animals(i).goal <> "" then
+            ' goal-based steering (crocodile on land only returns to water; don't re-aim)
+            dim _crocOnLand as integer = 0
+            if animals(i).species = "crocodile" then
+                if dist(animals(i).x, animals(i).y, ponds(0).x, ponds(0).y) > ponds(0).r then _crocOnLand = 1
+            end if
+            if animals(i).moveTimer <= 0 and animals(i).goal <> "" and _crocOnLand = 0 then
                 if animals(i).goal = "drink" then
                     ' move toward nearest water
                     dim bestD as single = 9999
@@ -1897,8 +1901,8 @@ do
                     end if
                 end if
             end if
-            ' idle wandering
-            if animals(i).state = "idle" and animals(i).moveTimer <= 0 and rnd < 0.05 then
+            ' idle wandering (crocodile does not wander on land)
+            if animals(i).state = "idle" and animals(i).moveTimer <= 0 and rnd < 0.05 and _crocOnLand = 0 then
                 dim dirs(0 to 7) as string = {"N","S","E","W","NE","NW","SE","SW"}
                 dim wdir as string = dirs(int(rnd*8))
                 apply_direction(i, wdir)
@@ -2180,6 +2184,11 @@ do
             end if
             ' skip mid-move unless urgent
             if animals(i).moveTimer > 0 and _urgent = 0 then continue for
+            ' crocodile on land: don't re-decide (pull-back returns it to water)
+            if animals(i).species = "crocodile" then
+                dim _cd2 as single = dist(animals(i).x, animals(i).y, ponds(0).x, ponds(0).y)
+                if _cd2 > ponds(0).r then continue for
+            end if
             if animals(i).lastDecide = 0 or (timer - animals(i).lastDecide) >= DECIDE_INTERVAL then
                 decide_animal(i)
                 decideIdx = (i + 1) mod nAnimals
