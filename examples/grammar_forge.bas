@@ -7,13 +7,15 @@
 ' (grammar first), and the decoupling of correctness (grammar) from variety
 ' (temperature 0.8). Deliberate limitations: the grammar constrains shape,
 ' not sense (a damage of 99 on a common stick is possible; grammar is not
-' validation); one fixed flat schema; the extractor is a minimal scanner
-' that is adequate only because the grammar guarantees the shape.
+' validation); one fixed flat schema. Extraction uses fbejson (vendored
+' at vendor/fbejson); a generation fails on invalid JSON, a missing
+' field, or a wrong-typed field.
 '
 ' Build: see build_grammar_forge.sh / run_grammar_forge.sh
 
 #include once "fbgfx.bi"
 #include once "llama.bi"
+#include once "json.bi"
 
 const SC_W = 800
 const SC_H = 600
@@ -219,76 +221,96 @@ function gen_raw(sysPrompt as string, usrPrompt as string) as string
     return filtered
 end function
 
-' ---------- extraction ----------
-function extract_str(raw as string, fieldName as string, byref outv as string) as integer
-    dim keyToken as string = chr(34) & fieldName & chr(34)
-    dim kp as integer = instr(raw, keyToken)
-    if kp = 0 then return 0
-    dim cp as integer = instr(kp + len(keyToken), raw, ":")
-    if cp = 0 then return 0
-    dim i as integer = cp + 1
-    while i <= len(raw) and mid(raw, i, 1) = " "
-        i += 1
-    wend
-    if i > len(raw) or mid(raw, i, 1) <> chr(34) then return 0
-    i += 1
-    dim value as string = ""
-    do while i <= len(raw)
-        dim c as string = mid(raw, i, 1)
-        if c = chr(34) then
-            outv = value
-            return 1
-        elseif c = chr(92) then
-            i += 1
-            if i <= len(raw) then
-                value += mid(raw, i, 1)
-                i += 1
-            else
-                return 0
-            end if
-        else
-            value += c
-            i += 1
-        end if
-    loop
-    return 0
-end function
+ ' ---------- extraction ----------
+function try_parse(raw as string, byref it as Item, byref reason as string) as integer
+    reason = ""
+    dim jobj as json.JSONobject
+    dim p as json.JSONobject ptr = jobj.loadString(raw)
+    if p = 0 then
+        reason = "invalid json"
+        return 0
+    end if
 
-function extract_int(raw as string, fieldName as string, byref outv as integer) as integer
-    dim keyToken as string = chr(34) & fieldName & chr(34)
-    dim kp as integer = instr(raw, keyToken)
-    if kp = 0 then return 0
-    dim cp as integer = instr(kp + len(keyToken), raw, ":")
-    if cp = 0 then return 0
-    dim i as integer = cp + 1
-    while i <= len(raw) and mid(raw, i, 1) = " "
-        i += 1
-    wend
-    dim start as integer = i
-    if i <= len(raw) and mid(raw, i, 1) = "-" then i += 1
-    while i <= len(raw)
-        dim ch as string = mid(raw, i, 1)
-        if ch >= "0" and ch <= "9" then
-            i += 1
-        else
-            exit while
-        end if
-    wend
-    if i = start then return 0
-    outv = val(mid(raw, start, i - start))
-    return 1
-end function
+    ' name (string)
+    if jobj.hasChild("name") = 0 then
+        reason = "missing name"
+        return 0
+    end if
+    dim nv as json.JSONvalue ptr = jobj.child("name")
+    if nv = 0 then
+        reason = "missing name"
+        return 0
+    end if
+    if nv->valueType() <> json.jvalue_type.jstring then
+        reason = "wrong type name"
+        return 0
+    end if
+    it.name = nv->getString()
 
-function try_parse(raw as string, byref it as Item) as integer
-    if extract_str(raw, "name", it.name) = 0 then return 0
-    dim d as integer
-    if extract_int(raw, "damage", d) = 0 then return 0
-    it.damage = d
-    dim sp as integer
-    if extract_int(raw, "speed", sp) = 0 then return 0
-    it.speed = sp
-    if extract_str(raw, "element", it.element) = 0 then return 0
-    if extract_str(raw, "flavor", it.flavor) = 0 then return 0
+    ' damage (number)
+    if jobj.hasChild("damage") = 0 then
+        reason = "missing damage"
+        return 0
+    end if
+    dim dv as json.JSONvalue ptr = jobj.child("damage")
+    if dv = 0 then
+        reason = "missing damage"
+        return 0
+    end if
+    if dv->valueType() <> json.jvalue_type.jnumber then
+        reason = "wrong type damage"
+        return 0
+    end if
+    it.damage = CInt(dv->getNumber())
+
+    ' speed (number)
+    if jobj.hasChild("speed") = 0 then
+        reason = "missing speed"
+        return 0
+    end if
+    dim sv as json.JSONvalue ptr = jobj.child("speed")
+    if sv = 0 then
+        reason = "missing speed"
+        return 0
+    end if
+    if sv->valueType() <> json.jvalue_type.jnumber then
+        reason = "wrong type speed"
+        return 0
+    end if
+    it.speed = CInt(sv->getNumber())
+
+    ' element (string)
+    if jobj.hasChild("element") = 0 then
+        reason = "missing element"
+        return 0
+    end if
+    dim ev as json.JSONvalue ptr = jobj.child("element")
+    if ev = 0 then
+        reason = "missing element"
+        return 0
+    end if
+    if ev->valueType() <> json.jvalue_type.jstring then
+        reason = "wrong type element"
+        return 0
+    end if
+    it.element = ev->getString()
+
+    ' flavor (string)
+    if jobj.hasChild("flavor") = 0 then
+        reason = "missing flavor"
+        return 0
+    end if
+    dim fv as json.JSONvalue ptr = jobj.child("flavor")
+    if fv = 0 then
+        reason = "missing flavor"
+        return 0
+    end if
+    if fv->valueType() <> json.jvalue_type.jstring then
+        reason = "wrong type flavor"
+        return 0
+    end if
+    it.flavor = fv->getString()
+
     return 1
 end function
 
@@ -306,7 +328,8 @@ sub do_forge()
     forging = 0
 
     dim it as Item
-    dim ok as integer = try_parse(raw, it)
+    dim reason as string = ""
+    dim ok as integer = try_parse(raw, it, reason)
     if ok then
         inventory(nInventory) = it
         nInventory += 1
@@ -322,7 +345,7 @@ sub do_forge()
         if ok then
             log_msg("PARSED name=" & it.name & " damage=" & str(it.damage) & " speed=" & str(it.speed) & " element=" & it.element & " flavor=" & it.flavor)
         else
-            log_msg("PARSE FAILURE")
+            log_msg("PARSE FAILURE " & reason)
         end if
     end if
     draw_screen()

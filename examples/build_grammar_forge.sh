@@ -41,9 +41,24 @@ if [ -f "$BUILD/libggml-vulkan.so" ]; then
     EXTRALIBS="$EXTRALIBS -l ggml-vulkan"
 fi
 
+# Submodule check
+if [ ! -f "$PROJECT_DIR/vendor/fbejson/inc/json.bi" ]; then
+    echo "fbejson submodule not populated." >&2
+    echo "Run: git submodule update --init" >&2
+    exit 1
+fi
+
+# Build fbejson libs if missing
+if [ ! -f "$PROJECT_DIR/vendor/fbejson/lib/libfbejson.a" ] || [ ! -f "$PROJECT_DIR/vendor/fbejson/lib/libfbebase64.a" ]; then
+    make -C "$PROJECT_DIR/vendor/fbejson" lib/libfbejson.a lib/libfbebase64.a
+fi
+
 fbc -i "$INC_DIR" \
+    -i "$PROJECT_DIR/vendor/fbejson/inc" \
+    -p "$PROJECT_DIR/vendor/fbejson/lib" \
     "$SCRIPT_DIR/grammar_forge.bas" \
     -p "$BUILD" \
     -l llama -l ggml -l ggml-base -l ggml-cpu $EXTRALIBS \
+    -l fbejson -l fbebase64 \
     -x "$SCRIPT_DIR/grammar_forge"
 echo "Build exit: $?"
