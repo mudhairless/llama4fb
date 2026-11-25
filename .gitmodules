@@ -1,3 +1,6 @@
 [submodule "vendor/fbejson"]
 	path = vendor/fbejson
 	url = https://codeberg.org/mudhairless/fbejson
+[submodule "vendor/llama.cpp"]
+	path = vendor/llama.cpp
+	url = https://github.com/krafton-ai/llama.cpp
