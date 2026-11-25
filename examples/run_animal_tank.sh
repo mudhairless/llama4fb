@@ -16,7 +16,7 @@ if [ -z "$LLAMA_CPP" ]; then
 fi
 LLAMA_CPP="$(cd "$LLAMA_CPP" && pwd)"
 
-if [ -n "${2:-}" ]; then
+if [ -n "${2:-}" ] && [ -d "$2" ]; then
     LLAMA_BUILD="$2"
 elif [ -n "${LLAMA_BUILD_DIR:-}" ]; then
     LLAMA_BUILD="$LLAMA_BUILD_DIR"
