@@ -1,4 +1,4 @@
-' persistent_companion.bas - a console chat with Pip, the Cartographer's computer
+' persistent_companion.bas - Pip, the Cartographer's computer, in a graphics window
 '
 ' Showcases: context lifecycle. One llama_context is kept for the whole session.
 ' Every user turn and every model reply is appended to a running message list
@@ -6,7 +6,10 @@
 ' line after each turn shows the growing token count against a visible budget,
 ' and the whole state is saved to disk and can be loaded again. This is the
 ' deliberate contrast with text_adventure, which restarts context on every
-' turn.
+' turn. The conversation is now presented in an fbgfx window: a ship readout
+' on the left, Pip's eye on the right, a wrapped log in the middle and a
+' three-line input box at the bottom - the presentation model of
+' text_adventure, adapted for a chat.
 '
 ' Deliberate limitations: no summarization and no sliding window when the
 ' context fills - the wall is shown honestly and only "quit" is accepted.
@@ -20,8 +23,20 @@
 '
 ' Build: see build_persistent_companion.sh / run_persistent_companion.sh
 
+#include once "fbgfx.bi"
 #include once "llama.bi"
 #include once "json.bi"
+
+const SC_W = 800
+const SC_H = 600
+const LOG_WRAP = 96
+const LOG_RING = 64
+const LOG_VISIBLE = 26
+const LOG_TOP = 176
+const LOG_BOTTOM = 500
+const INPUT_TOP = 506
+const INPUT_WRAP = 96
+const INPUT_LINES = 3
 
 const SESSION_FILE = "persistent_companion.session"
 const NOTES_FILE   = "persistent_companion.notes"
@@ -66,12 +81,19 @@ dim shared g_ctxSize as integer = 8192
 dim shared g_batchSize as integer = 2048
 
 ' ---------- UI / log ----------
+dim shared logLines(0 to 63) as string
+dim shared nLog as integer = 0
 dim shared logging as integer = 0
 dim shared demoMode as integer = 0
 dim shared demoAbort as integer = 0
 dim shared g_stopped as integer = 0
 dim shared g_quit as integer = 0
 dim shared inputBuf as string
+dim shared g_ctxLine as string
+' 0 idle, 1 generating, 2 tool blink
+dim shared g_pipState as integer = 0
+dim shared g_toolBlinkUntil as double = 0
+dim shared g_cursorOn as integer = 1
 
 ' ---------- tool defs ----------
 dim shared toolJson(0 to 10) as string
@@ -85,6 +107,83 @@ sub file_log(msg as string)
     print #f, msg
     close #f
 end sub
+
+' ---------- window log: wrap on add, tail-anchored when painted ----------
+sub ui_log_append_one(msg as string)
+    dim rest as string = msg
+    do while len(rest) > LOG_WRAP
+        dim chunk as string = left(rest, LOG_WRAP)
+        dim sp as integer = instrrev(chunk, " ")
+        if sp < 1 then sp = LOG_WRAP
+        dim part as string = left(rest, sp)
+        if nLog < LOG_RING then
+            logLines(nLog) = part
+            nLog += 1
+        else
+            for i as integer = 0 to LOG_RING-2
+                logLines(i) = logLines(i+1)
+            next
+            logLines(LOG_RING-1) = part
+        end if
+        rest = trim(mid(rest, sp + 1))
+    loop
+    if rest <> "" then
+        if nLog < LOG_RING then
+            logLines(nLog) = rest
+            nLog += 1
+        else
+            for i as integer = 0 to LOG_RING-2
+                logLines(i) = logLines(i+1)
+            next
+            logLines(LOG_RING-1) = rest
+        end if
+    end if
+end sub
+
+sub ui_log(msg as string)
+    dim cur as string = ""
+    for i as integer = 1 to len(msg)
+        dim ch as string = mid(msg, i, 1)
+        if ch = chr(10) then
+            ui_log_append_one(cur)
+            cur = ""
+        else
+            cur += ch
+        end if
+    next
+    if cur <> "" then ui_log_append_one(cur)
+end sub
+
+' ---------- input box: word-wrap with "> " on the first line ----------
+' returns the line count; counts past 3 so the caller can reject a character.
+function wrap_input(buf as string, outLines() as string) as integer
+    dim rest as string = buf
+    dim prefix as string = "> "
+    dim count as integer = 0
+    do
+        dim room as integer = INPUT_WRAP - len(prefix)
+        if room < 1 then room = 1
+        dim chunk as string = left(rest, room)
+        dim take as integer = len(chunk)
+        if len(rest) > room then
+            dim sp as integer = instrrev(chunk, " ")
+            if sp > 1 then take = sp
+        end if
+        if count <= INPUT_LINES then outLines(count) = prefix & rtrim(mid(rest, 1, take))
+        count += 1
+        rest = trim(mid(rest, take + 1))
+        if rest = "" then exit do
+        if count > INPUT_LINES then exit do
+        prefix = ""
+    loop
+    return count
+end function
+
+function input_fits(buf as string) as integer
+    dim probe(0 to INPUT_LINES) as string
+    if wrap_input(buf, probe()) <= INPUT_LINES then return 1
+    return 0
+end function
 
 ' ============================================================
 '  Helpers - lifted verbatim from examples/text_adventure.bas.
@@ -410,6 +509,151 @@ end sub
 '  End of lifted helpers.
 ' ============================================================
 
+' ============================================================
+'  Window presentation. Primitives only; no image assets.
+' ============================================================
+
+' upper half-circle from line segments, so the dome always reads as a dome
+sub draw_dome(cx as integer, cy as integer, r as integer, col as uinteger)
+    dim px as integer = cx + r
+    dim py as integer = cy
+    for a as double = 0.18 to 3.14159 step 0.18
+        dim nx as integer = cx + r * cos(a)
+        dim ny as integer = cy - r * sin(a)
+        line (px, py)-(nx, ny), col
+        px = nx
+        py = ny
+    next
+end sub
+
+sub draw_header_body()
+    line (0, 0)-(SC_W-1, 175), rgb(12, 14, 24), bf
+    line (499, 0)-(499, 175), rgb(80, 90, 110)
+
+    ' ---------- left: the ship readout ----------
+    for gy as integer = 16 to 160 step 32
+        line (0, gy)-(498, gy), rgb(20, 26, 40)
+    next
+    for gx as integer = 40 to 480 step 40
+        line (gx, 0)-(gx, 100), rgb(18, 22, 36)
+    next
+
+    ' the Cartographer: hull, dome, antenna; a ship silhouette, not a schematic
+    dim hull(0 to 8, 0 to 1) as integer
+    hull(0,0)=28:  hull(0,1)=70
+    hull(1,0)=70:  hull(1,1)=52
+    hull(2,0)=190: hull(2,1)=52
+    hull(3,0)=246: hull(3,1)=64
+    hull(4,0)=304: hull(4,1)=72
+    hull(5,0)=246: hull(5,1)=84
+    hull(6,0)=190: hull(6,1)=96
+    hull(7,0)=70:  hull(7,1)=96
+    hull(8,0)=28:  hull(8,1)=70
+    for k as integer = 0 to 7
+        line (hull(k,0), hull(k,1))-(hull(k+1,0), hull(k+1,1)), rgb(150, 180, 200)
+    next
+    line (70, 62)-(190, 62), rgb(90, 120, 145)
+    for wx as integer = 84 to 180 step 18
+        line (wx, 68)-(wx+8, 74), rgb(120, 190, 210), bf
+    next
+    draw_dome(150, 52, 26, rgb(130, 170, 195))
+    line (124, 52)-(176, 52), rgb(90, 120, 145)
+    line (110, 34)-(96, 10), rgb(150, 180, 200)
+    circle (96, 10), 6, rgb(160, 190, 210)
+    line (96, 10)-(96, 2), rgb(160, 190, 210)
+    dim eglow as integer = 100 + (int(timer * 3) mod 3) * 40
+    line (18, 64)-(28, 76), rgb(eglow, 70, 30), bf
+
+    ' status lights: slow rotating pattern
+    for i as integer = 0 to 3
+        dim onoff as integer = (int(timer * 2) + i) mod 4
+        dim lc as uinteger
+        if onoff = 0 then lc = rgb(120, 230, 140) else lc = rgb(35, 60, 45)
+        circle (24 + i*20, 108), 4, lc, , , , f
+        circle (24 + i*20, 108), 4, rgb(70, 80, 90)
+    next
+    draw string (18, 116), "PWR NAV SVR COM", rgb(90, 110, 120)
+
+    ' fake telemetry, refreshed every second or two
+    dim tick as integer = int(timer)
+    dim dtemp as integer = 46 + (tick mod 5)
+    dim prog as integer = 61 + ((tick \ 2) mod 12)
+    dim sstat as string = "nominal"
+    select case (tick \ 3) mod 4
+        case 1: sstat = "scanning"
+        case 2: sstat = "nominal"
+        case 3: sstat = "calibrating"
+    end select
+    draw string (18, 130), "drive temp: " & str(dtemp) & " C", rgb(120, 200, 200)
+    draw string (18, 142), "veil survey: " & str(prog) & "%", rgb(120, 200, 200)
+    draw string (18, 154), "sensors: " & sstat, rgb(120, 200, 200)
+    ' the real budget, updated after every turn
+    draw string (18, 166), g_ctxLine, rgb(230, 200, 120)
+
+    ' ---------- right: Pip ----------
+    line (502, 4)-(796, 171), rgb(8, 10, 16), bf
+    line (502, 4)-(796, 171), rgb(110, 65, 60), b
+    circle (650, 70), 44, rgb(80, 45, 45)
+    circle (650, 70), 39, rgb(45, 25, 28)
+
+    dim glow as double = 0.12
+    if g_pipState = 1 then
+        glow = 0.55 + 0.45 * (0.5 + 0.5 * sin(timer * 3.2))
+    elseif g_pipState = 2 andalso timer < g_toolBlinkUntil then
+        if int((g_toolBlinkUntil - timer) * 8) mod 2 = 0 then glow = 1.0 else glow = 0.2
+    end if
+    dim outerC as uinteger = rgb(int(60 + 110*glow), int(20 + 30*glow), int(18 + 14*glow))
+    dim innerC as uinteger = rgb(int(110 + 130*glow), int(35 + 55*glow), int(22 + 25*glow))
+    dim coreC  as uinteger = rgb(int(160 + 90*glow), int(60 + 90*glow), int(30 + 50*glow))
+    circle (650, 70), 30, outerC, , , , f
+    circle (650, 70), 21, innerC, , , , f
+    circle (650, 70), 11, coreC, , , , f
+    circle (644, 65), 3, rgb(int(160+90*glow), int(140+100*glow), int(120+100*glow)), , , , f
+    draw string (638, 130), "PIP", rgb(230, 120, 90)
+    draw string (602, 148), "CARTOGRAPHER", rgb(140, 110, 110)
+end sub
+
+sub draw_header()
+    screenlock
+    draw_header_body()
+    screenunlock
+end sub
+
+sub draw_window()
+    g_cursorOn = (int(timer * 2) mod 2 = 0)
+    screenlock
+    draw_header_body()
+
+    ' log band: last N wrapped lines, tail-anchored
+    line (0, LOG_TOP)-(SC_W-1, LOG_BOTTOM), rgb(10, 10, 20), bf
+    dim visible as integer = nLog
+    if visible > LOG_VISIBLE then visible = LOG_VISIBLE
+    dim first as integer = nLog - visible
+    dim y as integer = LOG_BOTTOM - visible * 12
+    for i as integer = first to nLog-1
+        draw string (8, y), logLines(i), rgb(200, 212, 224)
+        y += 12
+    next
+
+    ' input band: three wrapped lines with the prompt and a blinking cursor
+    line (0, INPUT_TOP)-(SC_W-1, SC_H-1), rgb(30, 30, 40), bf
+    line (6, INPUT_TOP+4)-(SC_W-7, SC_H-5), rgb(90, 100, 120), b
+    dim wl(0 to INPUT_LINES) as string
+    dim wc as integer = wrap_input(inputBuf, wl())
+    y = INPUT_TOP + 9
+    for i as integer = 0 to wc-1
+        dim txt as string = wl(i)
+        if i = wc-1 and g_cursorOn = 1 then txt += "_"
+        draw string (12, y), txt, rgb(225, 232, 240)
+        y += 12
+    next
+    screenunlock
+end sub
+
+sub refresh_ctx_line()
+    g_ctxLine = "context: " & str(nAllTok) & "/" & str(g_ctxSize) & " tokens"
+end sub
+
 ' ---------- tool definitions, built with fbejson (never by string concatenation) ----------
 sub init_tools()
     ' roll_dice(sides, count)
@@ -523,7 +767,7 @@ sub ensure_model()
     dim modelPath as string = "models/raon-1-nano-Q4_K_M.gguf"
     if dir("models") = "" then mkdir "models"
     if dir(modelPath) = "" then
-        print "Model not found. Downloading (~2GB)..."
+        ui_log "Model not found. Downloading (~2GB)..."
         shell "curl -L -o " & modelPath & " https://huggingface.co/KRAFTON/Raon-1-nano-gguf/resolve/main/raon-1-nano-Q4_K_M.gguf"
     end if
 end sub
@@ -534,7 +778,11 @@ sub llm_init()
     dim mparams as llama_model_params = llama_model_default_params()
     mparams.n_gpu_layers = -1
     g_model = llama_model_load_from_file(strptr(modelPath), mparams)
-    if g_model = 0 then print "Failed to load model": sleep: end
+    if g_model = 0 then
+        ui_log "Failed to load model"
+        sleep
+        end
+    end if
     dim cparams as llama_context_params = llama_context_default_params()
     cparams.n_ctx = g_ctxSize
     cparams.n_batch = g_batchSize
@@ -571,6 +819,7 @@ sub fresh_session()
         nAllTok = nTok
     end if
     kvMsgIndex = nMsg
+    refresh_ctx_line()
     file_log "FRESH tokens=" & str(nAllTok)
 end sub
 
@@ -578,7 +827,7 @@ function load_session() as integer
     dim nOut as uinteger = 0
     dim ok as boolean = llama_state_load_file(g_ctx, SESSION_FILE, @allToks(0), 16384, @nOut)
     if ok = false then
-        print "Could not load " & SESSION_FILE & "; starting fresh."
+        ui_log "Could not load " & SESSION_FILE & "; starting fresh."
         file_log "LOAD failed"
         return 0
     end if
@@ -590,7 +839,8 @@ function load_session() as integer
     ' the whole history is already in the restored KV cache; only new turns
     ' will be decoded from here on.
     kvMsgIndex = nMsg
-    print "Conversation resumed from " & SESSION_FILE
+    refresh_ctx_line()
+    ui_log "Conversation resumed from " & SESSION_FILE
     file_log "LOAD tokens=" & str(nAllTok)
     return 1
 end function
@@ -647,18 +897,23 @@ end function
 
 function generate_reply(delta as string) as string
     g_stopped = 0
+    g_pipState = 1
     dim nTok as integer = llama_tokenize(g_vocab, strptr(delta), len(delta), @promptToks(0), 16384, 0, 1)
     if nTok < 0 then nTok = -nTok
-    if nTok = 0 then return ""
+    if nTok = 0 then g_pipState = 0: return ""
     ' reserve 256 tokens for the reply
     if nAllTok + nTok + 256 >= g_ctxSize then
         g_stopped = 1
-        print STOP_LINE
+        g_pipState = 0
+        refresh_ctx_line()
+        ui_log STOP_LINE
         file_log STOP_LINE
+        draw_window()
         return ""
     end if
 
     decode_tokens(@promptToks(0), nTok, nAllTok, 1)
+    draw_header()
     for i as integer = 0 to nTok-1
         allToks(nAllTok + i) = promptToks(i)
     next
@@ -670,7 +925,8 @@ function generate_reply(delta as string) as string
         if demoMode = 1 andalso inkey = chr(27) then demoAbort = 1: exit while
         if nAllTok + 1 >= g_ctxSize then
             g_stopped = 1
-            print STOP_LINE
+            refresh_ctx_line()
+            ui_log STOP_LINE
             file_log STOP_LINE
             exit while
         end if
@@ -685,7 +941,11 @@ function generate_reply(delta as string) as string
         allToks(nAllTok) = tok
         nAllTok += 1
         nGen += 1
+        ' the eye pulses while tokens stream; the rest of the window can wait
+        if (nGen mod 8) = 0 then draw_header()
     wend
+    g_pipState = 0
+    refresh_ctx_line()
 
     dim filtered as string = ""
     for i as integer = 1 to len(result)
@@ -820,7 +1080,7 @@ sub log_recall(userInput as string, reply as string)
     end if
     if verdict <> "" then
         file_log "RECALL " & verdict
-        print "  (" & verdict & ")"
+        ui_log "  (" & verdict & ")"
     end if
 end sub
 
@@ -834,12 +1094,13 @@ sub process_input(byval userInput as string)
         return
     end if
     if g_stopped = 1 then
-        print STOP_LINE
+        ui_log STOP_LINE
         file_log STOP_LINE
+        draw_window()
         return
     end if
 
-    print "> " & userInput
+    ui_log "> " & userInput
     file_log "INPUT=" & userInput
 
     msgs(nMsg).role = "user"
@@ -866,8 +1127,9 @@ sub process_input(byval userInput as string)
     end if
     nMsg += 1
     kvMsgIndex = nMsg
-    print "Pip: " & reply
+    ui_log "Pip: " & reply
     file_log "REPLY=" & reply
+    draw_window()
 
     ' canonical tool loop: call, execute, append result as a user/tool turn,
     ' then let the model continue with the result still in context.
@@ -875,10 +1137,14 @@ sub process_input(byval userInput as string)
     do while pc.ok = 1 and steps < 4
         steps += 1
         file_log "TOOL_CALL=" & pc.norm
-        print "  [tool] " & pc.norm
+        g_pipState = 2
+        g_toolBlinkUntil = timer + 0.7
+        ui_log "  [tool] " & pc.norm
+        draw_header()
         dim result as string = execute_tool(pc)
         file_log "TOOL_RESULT=" & result
-        print "  [result] " & result
+        ui_log "  [result] " & result
+        draw_window()
         append_tool_result(msgs(), nMsg, pc.name, result)
         delta = build_delta()
         reply = generate_reply(delta)
@@ -898,19 +1164,25 @@ sub process_input(byval userInput as string)
         end if
         nMsg += 1
         kvMsgIndex = nMsg
-        print "Pip: " & reply
+        ui_log "Pip: " & reply
         file_log "REPLY=" & reply
+        draw_window()
     loop
 
     dim status as string = "context: " & str(nAllTok) & "/" & str(g_ctxSize) & " tokens"
-    print status
+    ui_log status
     file_log status
+    refresh_ctx_line()
+    draw_window()
     log_recall(userInput, reply)
     save_session()
 end sub
 
 ' ---------- main ----------
 randomize timer
+screenres SC_W, SC_H, 32
+windowtitle "Pip - survey vessel Cartographer"
+refresh_ctx_line()
 
 for ai as integer = 1 to 12
     if command(ai) = "--log" or command(ai) = "-log" then logging = 1
@@ -934,32 +1206,38 @@ if demoMode = 1 then
     end if
 else
     if dir(SESSION_FILE) <> "" then
-        print "Resume the previous conversation? (y/n)"
+        ui_log "Resume the previous conversation? (y/n)"
+        draw_window()
         dim ans as string = ""
         do
-            line input ans
-            ans = lcase(trim(ans))
-        loop while ans <> "y" and ans <> "n"
-        if ans = "y" then resumed = load_session()
+            dim rk as string = inkey
+            if rk = "y" or rk = "Y" then ans = "y"
+            if rk = "n" or rk = "N" then ans = "n"
+            if rk = chr(27) then g_quit = 1: exit do
+            if ans <> "" then exit do
+            sleep 16
+        loop
+        if g_quit = 0 andalso ans = "y" then resumed = load_session()
     end if
-    if resumed = 0 then fresh_session()
+    if g_quit = 0 andalso resumed = 0 then fresh_session()
 end if
 
-print "Pip - ship's computer, survey vessel Cartographer."
-print "Type quit to end and save. Notes: " & NOTES_FILE
+ui_log "Pip - ship's computer, survey vessel Cartographer."
+ui_log "Type quit to end and save. Notes: " & NOTES_FILE
+draw_window()
 
 if demoMode = 1 then
     dim scriptCount as integer = 8
     dim demoCmd(0 to 7) as string
     if resumed = 1 then
-        print "DEMO: recall script (resumed session)"
+        ui_log "DEMO: recall script (resumed session)"
         demoCmd(0) = "What did I ask you to note about the sensors?"
         demoCmd(1) = "What's my name and what is our mission?"
         demoCmd(2) = "Roll a twenty-sided die."
         demoCmd(3) = "quit"
         scriptCount = 4
     else
-        print "DEMO: planting script (fresh session)"
+        ui_log "DEMO: planting script (fresh session)"
         demoCmd(0) = "Hi Pip, I'm Ilya Voss, captain of the Cartographer."
         demoCmd(1) = "We're surveying the Veil nebula. Our mission is to chart it. Remember that."
         demoCmd(2) = "Roll two six-sided dice for me."
@@ -974,22 +1252,24 @@ if demoMode = 1 then
         if demoAbort = 1 or g_quit = 1 then exit for
         dim cmd as string = demoCmd(di)
         inputBuf = ""
-        print "> ";
+        draw_window()
         for ci as integer = 1 to len(cmd)
             if inkey = chr(27) then demoAbort = 1: exit for
-            inputBuf += mid(cmd, ci, 1)
-            print mid(cmd, ci, 1);
+            dim ch as string = mid(cmd, ci, 1)
+            if input_fits(inputBuf & ch) = 1 then inputBuf += ch
+            draw_window()
             sleep 50
         next
-        print ""
         if demoAbort = 1 then exit for
         process_input(inputBuf)
         inputBuf = ""
+        draw_window()
         if demoAbort = 1 then exit for
         if g_stopped = 1 then exit for
         ' pause about 2 seconds after each reply; Escape stops the demo
         for pi as integer = 0 to 39
             if inkey = chr(27) then demoAbort = 1: exit for
+            draw_window()
             sleep 50
         next
     next
@@ -1004,18 +1284,14 @@ do while g_quit = 0 and demoAbort = 0
         exit do
     end if
     if k = chr(13) then
-        print ""
         process_input(inputBuf)
         inputBuf = ""
     elseif k = chr(8) then
-        if len(inputBuf) > 0 then
-            inputBuf = left(inputBuf, len(inputBuf)-1)
-            print chr(8); " "; chr(8);
-        end if
+        if len(inputBuf) > 0 then inputBuf = left(inputBuf, len(inputBuf)-1)
     elseif len(k) = 1 and asc(k) >= 32 and asc(k) <= 126 then
-        inputBuf += k
-        print k;
+        if input_fits(inputBuf & k) = 1 then inputBuf += k
     end if
+    draw_window()
     sleep 16
 loop
 
