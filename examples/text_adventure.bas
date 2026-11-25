@@ -891,8 +891,8 @@ sub draw_room_bg()
     dim topXs(0 to TCOLS) as integer
     dim botXs(0 to TCOLS) as integer
     for c as integer = 0 to TCOLS
-        topXs(c) = 40 + c * 90
-        botXs(c) = 0 + c * 100
+        topXs(c) = 0 + c * 100
+        botXs(c) = -100 + c * 125
     next
     for row as integer = 0 to TROWS-1
         dim yTop as integer = 300 + row * (60 \ TROWS)
