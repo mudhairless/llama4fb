@@ -368,12 +368,24 @@ sub draw_screen()
         draw string (30, y + 8), latest.name
         draw string (30, y + 26), "DMG " & str(latest.damage) & "  SPD " & str(latest.speed) & "  " & latest.element
         dim fl as string = chr(34) & latest.flavor & chr(34)
-        dim fpos as integer = 1
+        dim remaining as string = fl
         dim fline as integer = 0
-        while fpos <= len(fl) and fline < 5
-            dim chunk as string = mid(fl, fpos, 46)
+        while len(remaining) > 0 and fline < 5
+            dim chunk as string
+            if len(remaining) <= 46 then
+                chunk = remaining
+                remaining = ""
+            else
+                chunk = left(remaining, 46)
+                dim sp as integer = instrrev(chunk, " ")
+                if sp > 1 then
+                    chunk = left(chunk, sp - 1)
+                    remaining = trim(mid(remaining, sp + 1))
+                else
+                    remaining = mid(remaining, 47)
+                end if
+            end if
             draw string (30, y + 44 + fline * 14), chunk
-            fpos += 46
             fline += 1
         wend
         y += 120
