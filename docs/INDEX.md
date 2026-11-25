@@ -2,21 +2,20 @@
 
 One document per example, describing what the example is made to showcase,
 what it deliberately limits or simplifies, and how a real implementation
-should improve on it. The doc is the brief for building (or rebuilding) the
-example: if a behavior is not serving the showcase purpose stated here, it
-does not belong in the example.
+should improve on it. The docs were written as the briefs the examples were
+built from and updated as each landed; they still serve as the spec if an
+example is ever rebuilt: if a behavior is not serving the showcase purpose
+stated here, it does not belong in the example.
 
-Existing examples:
+The examples (all eight are built and in the repo):
 - hello_llama.md — the floor: one prompt, one reply, minimal plumbing.
 - animal_tank.md — autonomous agents: a continuous multi-agent decision loop.
 - rpg_village.md — NPC dialogue with structured output the game can parse.
-
-Planned examples (agreed Nov 23, 2026, in this build order):
-1. grammar_forge.md — grammar-constrained generation: guaranteed-parseable JSON.
-2. ask_the_codex.md — embeddings: semantic search over game lore.
-3. text_adventure_parser.md — intent classification: freeform text to game commands.
-4. persistent_companion.md — context lifecycle: a real multi-turn conversation.
-5. procedural_describer.md — state-grounded generation: descriptions from world state.
+- grammar_forge.md — grammar-constrained generation: guaranteed-parseable JSON.
+- ask_the_codex.md — embeddings: semantic search over game lore.
+- text_adventure_parser.md — intent classification: freeform text to game commands.
+- persistent_companion.md — context lifecycle: a real multi-turn conversation.
+- procedural_describer.md — state-grounded generation: descriptions from world state.
 
 Companion document:
 - snippets.md — the repeated plumbing (model load, sampler chain, prompt
@@ -50,18 +49,23 @@ Shared conventions for every example:
 - Sampling follows the model's official card unless the doc says otherwise:
   general use is temperature 0.1 with presence_penalty 1.5; variety is a
   deliberate, documented choice per example, not an accident.
-- Every example must build with a build_<name>.sh script next to it,
-  taking the llama.cpp checkout path as an argument.
+- Every example must build with a build_<name>.sh script next to it.
+  The scripts default to the vendored submodule at vendor/llama.cpp;
+  an explicit checkout path as an argument (or LLAMA_CPP_DIR) overrides
+  it when given.
 - Every example except hello_llama (the basic one) supports two standard
   command-line flags, following animal_tank's implementation:
   `--log` appends a structured session log to `<example>.log` in the
   working directory (decisions, prompts' outcomes, state changes; the
   file a verification run quotes as evidence), and `--demo` runs the
   example as a self-driving showcase without interactive input (the tank
-  auto-cycles its camera across species; dialogue and turn-based
-  examples play a scripted session end to end). Combined, `--demo --log`
-  is the standard headless verification run for an example.
-- Demo pacing standard (Ebben, Nov 24, 2026, from rpg_village): a demo
+  auto-cycles its camera across species and exits after one full tour;
+  dialogue and turn-based examples play a scripted session end to end).
+  Combined, `--demo --log`
+  is the standard headless verification run for an example. Every demo
+  self-exits; recorded demo videos are made with
+  tools/record-demo-videos.sh.
+- Demo pacing standard: a demo
   is paced to be WATCHED, because it doubles as a promo video. Turn-based
   examples type their scripted commands in one letter at a time and
   pause after each result so the text can be read, landing the whole
