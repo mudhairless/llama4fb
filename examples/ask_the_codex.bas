@@ -467,6 +467,7 @@ if demoMode = 1 then
             log_msg("margin=" & format(margin, "0.000"))
         end if
         deallocate(qv)
+        if demoMode = 1 then sleep 2400, 1
     next
 
     ' out of scope
@@ -492,6 +493,7 @@ if demoMode = 1 then
         log_msg("oos_top=" & format(oosTop, "0.000"))
     end if
     deallocate(qv2)
+    sleep 3200, 1
 
     dim meanMargin as double = marginSum / 10.0
     print "top1=" & str(top1count) & "/10 top3=" & str(top3count) & "/10"
@@ -502,6 +504,9 @@ if demoMode = 1 then
         log_msg("mean_margin=" & format(meanMargin, "0.000"))
         log_msg("out-of-scope: " & format(oosTop, "0.000") & " vs lowest in-scope top-1: " & format(minInScopeTop1, "0.000"))
     end if
+
+    ' hold the final scores long enough to read them in the demo video
+    if demoMode = 1 then sleep 7200, 1
 
     llama_sampler_free(0)
     llama_free(g_ctx)
