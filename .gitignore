@@ -20,5 +20,8 @@ examples/*.session
 # Large model weights (auto-downloaded by examples)
 examples/models/
 
+# Recorded demo videos (owner places these manually)
+demo-videos/
+
 # Editor / OS
 .DS_Store
