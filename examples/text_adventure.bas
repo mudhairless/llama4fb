@@ -882,17 +882,39 @@ function handleIntent(pc as ParsedCall) as string
 end function
 
 ' ---------- drawing ----------
+sub draw_room_bg()
+    ' back wall
+    line (0, 40)-(SC_W-1, 300), rgb(46, 42, 52), bf
+    ' floor trapezoid
+    for yy as integer = 300 to 360
+        dim t as double = (yy - 300) / 60.0
+        dim x1 as integer = int(90 * (1.0 - t))
+        dim x2 as integer = SC_W - 1 - int(90 * (1.0 - t))
+        dim rc as integer = 58 + int(t * 12)
+        dim gc as integer = 48 + int(t * 8)
+        dim bc as integer = 38 + int(t * 6)
+        line (x1, yy)-(x2, yy), rgb(rc, gc, bc)
+    next
+    ' perspective lines
+    for i as integer = 0 to 8
+        dim topX as integer = 80 + i * 90
+        if topX > 720 then exit for
+        line (topX, 300)-(SC_W \ 2, 360), rgb(40, 36, 30)
+    next
+    ' baseboard
+    line (0, 298)-(SC_W-1, 302), rgb(30, 26, 24), bf
+end sub
+
 sub draw_room()
     screenlock
     ' title bar
     line (0, 0)-(SC_W-1, 40), rgb(40, 40, 60), bf
     draw string (10, 12), roomName(curRoom)
-    ' top drawing area
-    line (0, 40)-(SC_W-1, 360), rgb(20, 20, 30), bf
+    ' semi-3D room background
+    draw_room_bg()
 
     if curRoom = 0 then
         ' walls/floor
-        line (0, 300)-(SC_W-1, 360), rgb(60, 50, 40), bf
         ' door
         line (650, 120)-(720, 300), rgb(90, 60, 30), bf
         line (650, 120)-(720, 300), rgb(200, 200, 200), b
@@ -915,7 +937,6 @@ sub draw_room()
         line (360, 250)-(520, 300), rgb(120, 90, 60), bf
         draw string (370, 260), "DESK"
     elseif curRoom = 1 then
-        line (0, 300)-(SC_W-1, 360), rgb(60, 50, 40), bf
         ' tank
         line (120, 180)-(220, 280), rgb(80, 120, 180), bf
         line (120, 180)-(220, 280), rgb(200, 200, 200), b
@@ -942,7 +963,6 @@ sub draw_room()
             draw string (500, 265), "CHICKEN"
         end if
     elseif curRoom = 2 then
-        line (0, 300)-(SC_W-1, 360), rgb(60, 50, 40), bf
         ' portrait
         line (100, 100)-(220, 260), rgb(60, 40, 80), bf
         line (100, 100)-(220, 260), rgb(200, 200, 200), b
@@ -977,7 +997,6 @@ sub draw_room()
             draw string (640, 255), "HAND"
         end if
     elseif curRoom = 3 then
-        line (0, 300)-(SC_W-1, 360), rgb(60, 50, 40), bf
         ' whiteboard
         line (80, 120)-(300, 240), rgb(240, 240, 240), bf
         line (80, 120)-(300, 240), rgb(100, 100, 100), b
