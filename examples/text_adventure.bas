@@ -472,7 +472,7 @@ sub llm_init()
     dim sparams as llama_sampler_chain_params = llama_sampler_chain_default_params()
     g_smp = llama_sampler_chain_init(sparams)
     ' AGENTIC row: penalties (presence 0.0), top_k 40, top_p 0.9, temp 1.0, dist seed
-    llama_sampler_chain_add(g_smp, llama_sampler_init_penalties(llama_vocab_n_tokens(g_vocab), 64, 1.0, 0.0, 1.5))
+    llama_sampler_chain_add(g_smp, llama_sampler_init_penalties(llama_vocab_n_tokens(g_vocab), 64, 1.0, 0.0, 0.0))
     llama_sampler_chain_add(g_smp, llama_sampler_init_top_k(40))
     llama_sampler_chain_add(g_smp, llama_sampler_init_top_p(0.9, 1))
     llama_sampler_chain_add(g_smp, llama_sampler_init_temp(1.0))
