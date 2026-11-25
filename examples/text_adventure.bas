@@ -1053,11 +1053,16 @@ sub draw_room()
         ' office desk
         line (300, 250)-(460, 300), rgb(100, 70, 40), bf
         draw string (310, 230), "DESK"
+        ' table for trophy and safe
+        line (500, 285)-(740, 285), rgb(100, 70, 40)
+        line (500, 285)-(490, 300), rgb(100, 70, 40)
+        line (740, 285)-(750, 300), rgb(100, 70, 40)
+        line (490, 300)-(750, 300), rgb(100, 70, 40)
         ' trophy
-        line (520, 230)-(580, 300), rgb(200, 180, 60), bf
+        line (520, 230)-(580, 285), rgb(200, 180, 60), bf
         draw string (520, 210), "TROPHY"
         ' safe
-        line (620, 230)-(720, 300), rgb(120, 120, 120), bf
+        line (620, 230)-(720, 285), rgb(120, 120, 120), bf
         line (620, 230)-(720, 300), rgb(200, 200, 200), b
         draw string (635, 210), "SAFE"
         if safeUnlocked = 1 and handTaken = 0 then
