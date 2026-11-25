@@ -885,21 +885,30 @@ end function
 sub draw_room_bg()
     ' back wall
     line (0, 40)-(SC_W-1, 300), rgb(46, 42, 52), bf
-    ' floor trapezoid
-    for yy as integer = 300 to 360
-        dim t as double = (yy - 300) / 60.0
-        dim x1 as integer = int(90 * (1.0 - t))
-        dim x2 as integer = SC_W - 1 - int(90 * (1.0 - t))
-        dim rc as integer = 58 + int(t * 12)
-        dim gc as integer = 48 + int(t * 8)
-        dim bc as integer = 38 + int(t * 6)
-        line (x1, yy)-(x2, yy), rgb(rc, gc, bc)
+    ' checkerboard floor in perspective
+    const TCOLS = 8
+    const TROWS = 6
+    dim topXs(0 to TCOLS) as integer
+    dim botXs(0 to TCOLS) as integer
+    for c as integer = 0 to TCOLS
+        topXs(c) = 80 + c * 80
+        botXs(c) = 0 + c * 100
     next
-    ' perspective lines
-    for i as integer = 0 to 8
-        dim topX as integer = 80 + i * 90
-        if topX > 720 then exit for
-        line (topX, 300)-(SC_W \ 2, 360), rgb(40, 36, 30)
+    for row as integer = 0 to TROWS-1
+        dim yTop as integer = 300 + row * (60 \ TROWS)
+        dim yBot as integer = 300 + (row + 1) * (60 \ TROWS)
+        for col as integer = 0 to TCOLS-1
+            dim light as integer
+            if ((col + row) mod 2) = 0 then light = 1 else light = 0
+            dim tc as uinteger
+            if light = 1 then tc = rgb(95, 82, 68) else tc = rgb(52, 46, 38)
+            for yy as integer = yTop to yBot - 1
+                dim t as double = (yy - 300) / 60.0
+                dim xl as integer = int(topXs(col) + (botXs(col) - topXs(col)) * t)
+                dim xr as integer = int(topXs(col+1) + (botXs(col+1) - topXs(col+1)) * t)
+                line (xl, yy)-(xr, yy), tc
+            next
+        next
     next
     ' baseboard
     line (0, 298)-(SC_W-1, 302), rgb(30, 26, 24), bf
