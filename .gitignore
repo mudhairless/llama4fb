@@ -4,6 +4,7 @@ examples/animal_tank
 examples/hello_llama
 examples/grammar_forge
 examples/ask_the_codex
+examples/text_adventure
 examples/*.mp4
 examples/debug_cmd.txt
 examples/*.log

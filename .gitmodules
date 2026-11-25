@@ -1,0 +1,3 @@
+[submodule "vendor/fbejson"]
+	path = vendor/fbejson
+	url = https://codeberg.org/mudhairless/fbejson
