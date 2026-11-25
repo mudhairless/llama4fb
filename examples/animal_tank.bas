@@ -1,6 +1,7 @@
 ' animal_tank.bas - autonomous wildlife tank demo using raon-1-nano via llama.cpp
 ' A "fish tank" where instead of fish there are land animals that decide their own
 ' next action by prompting the model. Arrow keys pan the viewport.
+' --demo runs one full species tour (about 90 seconds) and exits.
 ' Build: see build_animal_tank.sh / run_animal_tank.sh
 
 #include once "fbgfx.bi"
@@ -1529,6 +1530,11 @@ do
                 demoTimer = timer
                 demoIndex = 0
             elseif timer - demoTimer >= 10 then
+                if demoIndex = 8 then
+                    ' last slot (crocodile) is over: finish the tour via the normal teardown
+                    log_msg("DEMO-COMPLETE one full species tour finished (9 species)")
+                    exit do
+                end if
                 demoTimer = timer
                 demoIndex = (demoIndex + 1) mod 9
             end if
