@@ -891,7 +891,7 @@ sub draw_room_bg()
     dim topXs(0 to TCOLS) as integer
     dim botXs(0 to TCOLS) as integer
     for c as integer = 0 to TCOLS
-        topXs(c) = 80 + c * 80
+        topXs(c) = 40 + c * 90
         botXs(c) = 0 + c * 100
     next
     for row as integer = 0 to TROWS-1
