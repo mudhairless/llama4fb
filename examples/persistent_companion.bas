@@ -159,6 +159,21 @@ sub ui_log(msg as string)
     if cur <> "" then ui_log_append_one(cur)
 end sub
 
+' Only finished, spoken turns reach the window log. Raw tool calls and
+' reasoning stay in --log; the file_log calls are unchanged.
+sub ui_pip_reply(reply as string)
+    if instr(reply, "<tool_call>") > 0 then return
+    dim shown as string = reply
+    do while instr(shown, "<think>") > 0
+        dim s as integer = instr(shown, "<think>")
+        dim e as integer = instr(s, shown, "</think>")
+        if e = 0 then exit do
+        shown = left(shown, s-1) & mid(shown, e + len("</think>"))
+    loop
+    shown = trim(shown)
+    if shown <> "" then ui_log shown
+end sub
+
 ' ---------- input box: word-wrap with "> " on the first line ----------
 ' returns the line count; counts past 3 so the caller can reject a character.
 function wrap_input(buf as string, outLines() as string) as integer
@@ -944,7 +959,6 @@ function load_session() as integer
     ' the whole history is already in the restored KV cache; only new turns
     ' will be decoded from here on.
     kvMsgIndex = nMsg
-    ui_log "Conversation resumed from " & SESSION_FILE
     file_log "LOAD tokens=" & str(nAllTok)
     return 1
 end function
@@ -1181,10 +1195,7 @@ sub log_recall(userInput as string, reply as string)
             verdict += "note RECALL-MISS"
         end if
     end if
-    if verdict <> "" then
-        file_log "RECALL " & verdict
-        ui_log "  (" & verdict & ")"
-    end if
+    if verdict <> "" then file_log "RECALL " & verdict
 end sub
 
 ' ---------- one exchange ----------
@@ -1230,7 +1241,7 @@ sub process_input(byval userInput as string)
     end if
     nMsg += 1
     kvMsgIndex = nMsg
-    ui_log "Pip: " & reply
+    ui_pip_reply(reply)
     file_log "REPLY=" & reply
     draw_window()
 
@@ -1242,11 +1253,9 @@ sub process_input(byval userInput as string)
         file_log "TOOL_CALL=" & pc.norm
         g_pipState = 2
         g_toolBlinkUntil = timer + 0.7
-        ui_log "  [tool] " & pc.norm
         draw_header()
         dim result as string = execute_tool(pc)
         file_log "TOOL_RESULT=" & result
-        ui_log "  [result] " & result
         draw_window()
         append_tool_result(msgs(), nMsg, pc.name, result)
         delta = build_delta()
@@ -1267,13 +1276,12 @@ sub process_input(byval userInput as string)
         end if
         nMsg += 1
         kvMsgIndex = nMsg
-        ui_log "Pip: " & reply
+        ui_pip_reply(reply)
         file_log "REPLY=" & reply
         draw_window()
     loop
 
     dim status as string = "context: " & str(nAllTok) & "/" & str(g_ctxSize) & " tokens"
-    ui_log status
     file_log status
     draw_window()
     log_recall(userInput, reply)
@@ -1295,7 +1303,6 @@ for ai as integer = 1 to 12
 next
 
 g_pipState = 1
-ui_log "Waking Pip..."
 draw_window()
 init_tools()
 llm_init()
@@ -1327,22 +1334,18 @@ else
     if g_quit = 0 andalso resumed = 0 then fresh_session()
 end if
 
-ui_log "Pip - ship's computer, survey vessel Cartographer."
-ui_log "Type quit to end and save. Notes: " & NOTES_FILE
 draw_window()
 
 if demoMode = 1 then
     dim scriptCount as integer = 8
     dim demoCmd(0 to 7) as string
     if resumed = 1 then
-        ui_log "DEMO: recall script (resumed session)"
         demoCmd(0) = "What did I ask you to note about the sensors?"
         demoCmd(1) = "What's my name and what is our mission?"
         demoCmd(2) = "Roll a twenty-sided die."
         demoCmd(3) = "quit"
         scriptCount = 4
     else
-        ui_log "DEMO: planting script (fresh session)"
         demoCmd(0) = "Hi Pip, I'm Ilya Voss, captain of the Cartographer."
         demoCmd(1) = "We're surveying the Veil nebula. Our mission is to chart it. Remember that."
         demoCmd(2) = "Roll two six-sided dice for me."
