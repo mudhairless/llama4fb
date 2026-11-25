@@ -2,19 +2,21 @@
 '
 ' What this showcases: prompt-as-report. A 12-room dungeon floor is held as
 ' REAL state in code (type, contents, features, exits, visited, last event,
-' plus the chest / trap / door flags). On entering a room the program turns
-' that state alone into a flat fact list and the model writes two or three
-' sentences of prose from it. The model narrates the database; it does not
-' replace it.
+' plus the chest / trap / door flags). Each room also carries the level
+' designer's short sensory notes: a smell, the air, and a sound marked nearby
+' or far off. On entering a room the program turns all of that into a flat
+' fact list and the model writes four or five sentences of prose from it.
+' The notes are seeds for atmosphere, not finished prose. The model narrates
+' the database; it does not replace it.
 '
 ' Deliberate limitations:
 '   * Descriptions are regenerated on EVERY entry, with NO cache. An unchanged
 '     room can be described differently on two visits; continuity is not
 '     guaranteed and is not attempted.
-'   * Grounding reduces invention but does not eliminate it. The model may add
-'     a smell or a sound to colour a listed fact. It must never add an object,
-'     creature, person, or exit that the fact list does not contain; Tab (debug)
-'     exposes the facts so a reader can check the prose against them.
+'   * Grounding reduces invention but does not eliminate it. The designer
+'     notes cut down on made-up smells and sounds, but the model must never
+'     add an object, creature, person, or exit that the fact list does not
+'     contain; Tab (debug) exposes the facts so a reader can check the prose.
 '   * One floor, a fixed room graph, and no combat. The only state changes are
 '     the chest, the dart trap, and the vault door.
 '   * Tone consistency rests entirely on the system prompt and the sampler.
@@ -36,13 +38,39 @@ const SC_H = 600
 const GW = 4
 const GH = 3
 
-const SYS_PROMPT = "You narrate a small dungeon floor to a player in terse, evocative, second-person prose. Write exactly two or three sentences, no more. Describe ONLY what is in the fact list you are given. Atmosphere may colour a listed fact (how the light falls on the spears, how the air feels), and you may add a smell or a sound, but you must never introduce an object, furniture, shelf, container, creature, person, or exit that is not in the list. When Contents says 'nothing of note', give the room no contents at all. Refer to exits only by the directions listed (north, east, south, west); never name a room the player has not entered. If a fact says something is empty, spent, open, or closed, say so. Use only ASCII characters. No markdown, no headings, no lists."
+' Built from pieces because a single FB string literal of this length is truncated.
+dim shared sysPrompt as string
+
+sub init_prompt()
+    sysPrompt = "You narrate a small dungeon floor to a player in terse, evocative, second-person prose. " & _
+        "CRITICAL: write in second person only. Never use I, me, my, mine, we, our, or the phrase 'the player'. " & _
+        "Write four or five complete sentences, no more. End each sentence with a period and begin it with a capital letter. " & _
+        "Describe ONLY what is in the fact list you are given. " & _
+        "The Smell hint, Air hint and Sound hint are short designer notes, not sentences to repeat. " & _
+        "Turn each one into your own natural narration: let the reader smell it, feel the air, and hear the sound. " & _
+        "Never copy a note's wording, never use the words 'hint', 'close', or 'distant' as bare labels, " & _
+        "and never invent a source, object, creature, or person behind a smell or sound. " & _
+        "Render a nearby sound as happening here or beside you, a far-off one as coming from beyond the room; " & _
+        "never call the same sound both nearby and far off. " & _
+        "If contents and feature are listed, work them in rather than writing only about smells and sounds. " & _
+        "You may colour a listed fact with light or texture, but you must never introduce an object, furniture, " & _
+        "shelf, container, creature, person, or exit that is not in the list. " & _
+        "When Contents says 'nothing of note', give the room no contents at all. " & _
+        "Refer to exits only by the directions listed (north, east, south, west); never name a room the reader has not entered. " & _
+        "Call an exit only a direction, never a door, doorway, passage, or corridor. " & _
+        "If a fact says something is empty, spent, open, or closed, say so. " & _
+        "Vary your sentence openings; do not begin several sentences the same way. " & _
+        "Use only ASCII characters. No markdown, no headings, no lists."
+end sub
 
 type RoomRec
     name as string
     contents as string
     feature as string
     lastEvent as string
+    smellHint as string
+    airHint as string
+    soundHint as string
     visited as integer
     looted as integer
     trapArmed as integer
@@ -142,51 +170,92 @@ function fact_list(byval x as integer, byval y as integer, byval oneLine as inte
     dim f3 as string = "Feature: " & ft
     dim f4 as string = "Exits: " & exits_text(x, y)
     dim f5 as string = "Last event: " & ev
+    dim f6 as string = "Smell hint: " & rooms(x, y).smellHint
+    dim f7 as string = "Air hint: " & rooms(x, y).airHint
+    dim f8 as string = "Sound hint: " & rooms(x, y).soundHint
 
     if oneLine = 1 then
-        return f1 & " | " & f2 & " | " & f3 & " | " & f4 & " | " & f5
+        return f1 & " | " & f2 & " | " & f3 & " | " & f4 & " | " & f5 & " | " & f6 & " | " & f7 & " | " & f8
     end if
-    return f1 & chr(10) & f2 & chr(10) & f3 & chr(10) & f4 & chr(10) & f5
+    return f1 & chr(10) & f2 & chr(10) & f3 & chr(10) & f4 & chr(10) & f5 & chr(10) & f6 & chr(10) & f7 & chr(10) & f8
 end function
 
 sub init_floor()
+    ' The hint fields are the designer's notes. They stay short and sensory:
+    ' the model expands them, so they must not smuggle in a new interactable.
     ' (0,0)
     rooms(0,0).name = "Entrance Hall"
     rooms(0,0).feature = "an iron gate, now closed behind you"
+    rooms(0,0).smellHint = "cold iron and stale dust"
+    rooms(0,0).airHint = "a faint draft from the east"
+    rooms(0,0).soundHint = "the gate latch ticking nearby"
     ' (1,0)
     rooms(1,0).name = "Dusty Corridor"
+    rooms(1,0).smellHint = "dry dust and old stone"
+    rooms(1,0).airHint = "still, with a thin haze"
+    rooms(1,0).soundHint = "a faint scrape from far off to the east"
     ' (2,0)
     rooms(2,0).name = "Guard Post"
     rooms(2,0).contents = "a rack of rusted spears"
+    rooms(2,0).smellHint = "rust and wet stone"
+    rooms(2,0).airHint = "a cool draft from the west"
+    rooms(2,0).soundHint = "a low drone from far off to the south"
     ' (3,0)
     rooms(3,0).name = "Collapsed Stair"
     rooms(3,0).feature = "rubble blocking the stairs up"
+    rooms(3,0).smellHint = "granite dust and damp"
+    rooms(3,0).airHint = "cold air spilling down from above"
+    rooms(3,0).soundHint = "small stones settling nearby"
     ' (0,1)
     rooms(0,1).name = "Store Room"
     rooms(0,1).contents = "crates and barrels"
+    rooms(0,1).smellHint = "damp wood and grain"
+    rooms(0,1).airHint = "stuffy and heavy, barely moving"
+    rooms(0,1).soundHint = "wood settling among the barrels nearby"
     ' (1,1)
     rooms(1,1).name = "Chest Chamber"
     rooms(1,1).contents = "a wooden chest holding a silver key"
+    rooms(1,1).smellHint = "polished metal and old wood"
+    rooms(1,1).airHint = "still, with a cool edge near the chest"
+    rooms(1,1).soundHint = "a soft tick at the lock nearby"
     rooms(1,1).looted = 0
     ' (2,1)
     rooms(2,1).name = "Trap Corridor"
     rooms(2,1).feature = "a dart trap, armed"
+    rooms(2,1).smellHint = "oiled metal and dust"
+    rooms(2,1).airHint = "a thin current running the length of the corridor"
+    rooms(2,1).soundHint = "a spring's faint click nearby"
     rooms(2,1).trapArmed = 1
     ' (3,1)
     rooms(3,1).name = "Shrine"
     rooms(3,1).feature = "an obsidian obelisk"
+    rooms(3,1).smellHint = "cold stone and a mineral tang"
+    rooms(3,1).airHint = "hushed and heavy, barely stirring"
+    rooms(3,1).soundHint = "a low tone, far off"
     ' (0,2)
     rooms(0,2).name = "Flooded Cellar"
     rooms(0,2).feature = "ankle-deep black water"
+    rooms(0,2).smellHint = "black water and mildew"
+    rooms(0,2).airHint = "damp and cold against your ankles"
+    rooms(0,2).soundHint = "drips falling nearby"
     ' (1,2)
     rooms(1,2).name = "Library"
     rooms(1,2).contents = "moldering books"
+    rooms(1,2).smellHint = "moldering paper and damp"
+    rooms(1,2).airHint = "a dry stirring of air"
+    rooms(1,2).soundHint = "pages shifting faintly nearby"
     ' (2,2)
     rooms(2,2).name = "Armory"
     rooms(2,2).contents = "rows of empty weapon racks"
+    rooms(2,2).smellHint = "oiled steel and dust"
+    rooms(2,2).airHint = "a hollow draft between the racks"
+    rooms(2,2).soundHint = "a rattle from far off to the north"
     ' (3,2)
     rooms(3,2).name = "Vault Antechamber"
     rooms(3,2).feature = "a heavy sealed door"
+    rooms(3,2).smellHint = "sealed stone and old metal"
+    rooms(3,2).airHint = "stagnant, with no draft at all"
+    rooms(3,2).soundHint = "a faint rasp at the door nearby"
     rooms(3,2).doorSealed = 1
 end sub
 
@@ -317,7 +386,7 @@ sub draw_all()
     ' description panel, facts panel when debugging
     dim dx0 as integer = 316
     dim dx1 as integer = 790
-    if debugOn = 1 then dx1 = 556
+    if debugOn = 1 then dx1 = 520
     line (dx0,50)-(dx1,432), rgb(28,28,40), bf
     line (dx0,50)-(dx1,432), rgb(120,120,150), b
     draw string (dx0+8, 56), "DESCRIPTION - " & rooms(px,py).name, rgb(255,220,140)
@@ -326,20 +395,20 @@ sub draw_all()
     if g_generating = 1 then
         draw string (dx0+8, 78), "Describing...", rgb(150,200,150)
     else
-        wrap_lines(dl(), ndl, curDesc, iif(debugOn = 1, 27, 57))
+        wrap_lines(dl(), ndl, curDesc, iif(debugOn = 1, 22, 57))
         for i as integer = 0 to ndl-1
             draw string (dx0+8, 78 + i*16), dl(i), rgb(220,225,235)
         next
     end if
     if debugOn = 1 then
-        line (566,50)-(790,432), rgb(34,30,28), bf
-        line (566,50)-(790,432), rgb(200,150,90), b
-        draw string (574, 56), "FACTS (verbatim)", rgb(255,190,110)
+        line (530,50)-(790,432), rgb(34,30,28), bf
+        line (530,50)-(790,432), rgb(200,150,90), b
+        draw string (538, 56), "FACTS (verbatim)", rgb(255,190,110)
         dim fl(0 to 63) as string
         dim nfl as integer = 0
-        wrap_lines(fl(), nfl, fact_list(px, py, 0), 26)
+        wrap_lines(fl(), nfl, fact_list(px, py, 0), 30)
         for i as integer = 0 to nfl-1
-            draw string (574, 78 + i*15), fl(i), rgb(235,210,175)
+            draw string (538, 76 + i*13), fl(i), rgb(235,210,175)
         next
     end if
 
@@ -365,12 +434,13 @@ function describe_room(byval x as integer, byval y as integer) as string
     llama_memory_clear(llama_get_memory(g_ctx), true)
 
     dim usr as string
-    usr = "Describe the room you have just entered in two or three sentences, using only these facts:" & chr(10)
+    usr = "Describe the room you have just entered in four or five sentences, using only these facts:" & chr(10)
     usr = usr & fact_list(x, y, 0) & chr(10)
+    usr = usr & "The Smell, Air and Sound lines are the designer's notes. Rewrite them in your own words; do not repeat their phrasing. Make the smell something the player catches on the air, the air something they feel, and the sound something heard nearby or far off as the note says. Never quote the labels or invent a source behind a sound." & chr(10)
     usr = usr & "This list is exhaustive for anything the player can interact with. Do not add any object, creature, person, or exit."
 
     dim prompt as string
-    prompt = "<|im_start|>system" & chr(10) & SYS_PROMPT & chr(10) & "<|im_end|>" & chr(10)
+    prompt = "<|im_start|>system" & chr(10) & sysPrompt & chr(10) & "<|im_end|>" & chr(10)
     prompt = prompt & "<|im_start|>user" & chr(10) & usr & chr(10) & "<|im_end|>" & chr(10)
     ' thinking mode OFF
     prompt = prompt & "<|im_start|>assistant" & chr(10) & "<think></think>" & chr(10) & chr(10)
@@ -413,7 +483,7 @@ function describe_room(byval x as integer, byval y as integer) as string
     dim result as string = ""
     dim nCur as long = nTok
     dim nGen as integer = 0
-    while nGen < 110
+    while nGen < 200
         ' Escape still exits cleanly while a description is generating.
         if g_abort = 1 then exit while
         if demoMode = 1 andalso inkey = chr(27) then g_abort = 1: exit while
@@ -482,6 +552,7 @@ sub enter_room(byval x as integer, byval y as integer, byval entryNo as integer)
         rooms(x,y).trapArmed = 0
         rooms(x,y).feature = "a spent dart trap"
         rooms(x,y).lastEvent = "a dart trap sprung as you entered; the darts missed"
+        rooms(x,y).soundHint = "spent darts rattling once, then still, nearby"
         statusMsg = "A dart trap springs as you enter. The darts miss."
         file_log("STATE TRAP feature=" & rooms(x,y).feature & " event=" & rooms(x,y).lastEvent)
         file_log("TRAP-SPRUNG-OK feature=" & rooms(x,y).feature & " event=" & rooms(x,y).lastEvent)
@@ -511,6 +582,8 @@ sub interact_press()
             rooms(px,py).looted = 1
             rooms(px,py).contents = "an open, empty wooden chest"
             rooms(px,py).lastEvent = "the chest was looted and the silver key taken"
+            rooms(px,py).smellHint = "empty wood and cold metal"
+            rooms(px,py).soundHint = "the lid's echo fading nearby"
             hasKey = 1
             statusMsg = "You lift the lid and take the silver key."
             file_log("STATE CHEST contents=" & rooms(px,py).contents & " key=yes event=" & rooms(px,py).lastEvent)
@@ -525,6 +598,9 @@ sub interact_press()
                 rooms(px,py).feature = "a heavy door, now open"
                 rooms(px,py).contents = "a hoard of dull gold coins"
                 rooms(px,py).lastEvent = "the sealed door was opened with the silver key"
+                rooms(px,py).smellHint = "coin dust and cold air"
+                rooms(px,py).airHint = "a cold draft pouring from the open door"
+                rooms(px,py).soundHint = "coins shifting softly nearby"
                 statusMsg = "The silver key turns. The door swings open."
                 file_log("STATE DOOR feature=" & rooms(px,py).feature & " contents=" & rooms(px,py).contents & " event=" & rooms(px,py).lastEvent)
                 file_log("DOOR-OPEN-OK feature=" & rooms(px,py).feature & " contents=" & rooms(px,py).contents & " event=" & rooms(px,py).lastEvent)
@@ -636,6 +712,7 @@ if logging = 1 then
 end if
 
 init_floor()
+init_prompt()
 
 screenlock
 cls
