@@ -655,8 +655,20 @@ if demoMode = 0 then
     enter_room(px, py, nDesc+1)
 end if
 
+' interactive keys are read from the raw scancode state, with edge detection
+' so holding a key does not repeat the action every frame
+dim lastUp as integer = 0
+dim lastDown as integer = 0
+dim lastLeft as integer = 0
+dim lastRight as integer = 0
+dim lastSpace as integer = 0
+dim lastTab as integer = 0
+
 do
-    if inkey = chr(27) then g_abort = 1
+    ' inkey is only used for Escape here. Reading it again below would eat
+    ' the key before the multikey handlers see it.
+    dim k as string = inkey
+    if k = chr(27) then g_abort = 1
     if g_abort = 1 then exit do
 
     if demoMode = 1 then
@@ -699,24 +711,29 @@ do
         exit do
     end if
 
-    dim k as string = inkey
-    select case k
-        case chr(255) + "H"
-            try_move(0, -1)
-        case chr(255) + "P"
-            try_move(0, 1)
-        case chr(255) + "K"
-            try_move(-1, 0)
-        case chr(255) + "M"
-            try_move(1, 0)
-        case " "
-            interact_press()
-        case chr(9)
-            debugOn = 1 - debugOn
-            draw_all()
-        case chr(27)
-            exit do
-    end select
+    dim nowUp as integer = multikey(FB.SC_UP)
+    dim nowDown as integer = multikey(FB.SC_DOWN)
+    dim nowLeft as integer = multikey(FB.SC_LEFT)
+    dim nowRight as integer = multikey(FB.SC_RIGHT)
+    dim nowSpace as integer = multikey(FB.SC_SPACE)
+    dim nowTab as integer = multikey(FB.SC_TAB)
+
+    if nowUp = 1 and lastUp = 0 then try_move(0, -1)
+    if nowDown = 1 and lastDown = 0 then try_move(0, 1)
+    if nowLeft = 1 and lastLeft = 0 then try_move(-1, 0)
+    if nowRight = 1 and lastRight = 0 then try_move(1, 0)
+    if nowSpace = 1 and lastSpace = 0 then interact_press()
+    if nowTab = 1 and lastTab = 0 then
+        debugOn = 1 - debugOn
+        draw_all()
+    end if
+
+    lastUp = nowUp
+    lastDown = nowDown
+    lastLeft = nowLeft
+    lastRight = nowRight
+    lastSpace = nowSpace
+    lastTab = nowTab
     sleep 16
 loop
 
