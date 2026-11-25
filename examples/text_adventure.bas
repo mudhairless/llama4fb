@@ -1031,6 +1031,19 @@ sub draw_room()
             draw string (505, 260), "CHICKEN"
         end if
     elseif curRoom = 2 then
+        ' large window behind desk, extending to the right
+        line (290, 55)-(770, 205), rgb(120, 160, 200), bf
+        line (290, 55)-(770, 205), rgb(60, 90, 130), b
+        line (292, 57)-(768, 120), rgb(150, 190, 230), bf
+        line (292, 120)-(768, 203), rgb(70, 70, 75), bf
+        for i as integer = 0 to 6
+            line (292 + i*68, 120)-(292 + i*68, 203), rgb(200, 200, 200)
+        next
+        ' one car in the lot
+        line (520, 150)-(575, 175), rgb(200, 40, 40), bf
+        line (525, 142)-(570, 150), rgb(200, 40, 40), bf
+        circle (530, 178), 4, rgb(30, 30, 30), , , , f
+        circle (565, 178), 4, rgb(30, 30, 30), , , , f
         ' portrait
         line (100, 100)-(220, 260), rgb(60, 40, 80), bf
         line (100, 100)-(220, 260), rgb(200, 200, 200), b
