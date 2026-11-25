@@ -44,6 +44,8 @@ wins over the submodule.
 - `inc/stdbool.bi` — `bool` shim (`type bool as boolean`).
 - `examples/` — small demo programs, including `hello_llama.bas`.
 
+**Example guides:** see [docs/INDEX.md](docs/INDEX.md) for per-example walkthroughs.
+
 ## Build & run an example
 
 From `examples/`, the scripts default to the vendored tree:
