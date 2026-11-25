@@ -5,6 +5,7 @@ examples/hello_llama
 examples/grammar_forge
 examples/ask_the_codex
 examples/text_adventure
+examples/persistent_companion
 examples/*.mp4
 examples/debug_cmd.txt
 examples/*.log
