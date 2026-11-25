@@ -1044,24 +1044,36 @@ sub draw_room()
         line (525, 142)-(570, 150), rgb(200, 40, 40), bf
         circle (530, 178), 4, rgb(30, 30, 30), , , , f
         circle (565, 178), 4, rgb(30, 30, 30), , , , f
-        ' portrait
+        ' portrait frame
         line (100, 100)-(220, 260), rgb(60, 40, 80), bf
         line (100, 100)-(220, 260), rgb(200, 200, 200), b
-        ' pupils follow mouse
+        ' face
+        circle (160, 165), 42, rgb(230, 200, 170), , , 1.1, f
+        ' shoulders / suit
+        line (105, 230)-(215, 230), rgb(40, 40, 60)
+        line (105, 230)-(95, 260), rgb(40, 40, 60)
+        line (215, 230)-(225, 260), rgb(40, 40, 60)
+        line (95, 260)-(225, 260), rgb(40, 40, 60)
+        paint (160, 245), rgb(40, 40, 60), rgb(40, 40, 60)
+        ' eyes (white sclera fixed)
+        circle (145, 170), 7, rgb(255, 255, 255), , , , f
+        circle (175, 170), 7, rgb(255, 255, 255), , , , f
+        ' pupils follow cursor, clamped inside sclera
         dim mx as integer, my as integer
         getmouse mx, my
         if mx < 0 then mx = 160
         if my < 0 then my = 180
-        dim px as integer = 160 + (mx - 400) \ 20
-        dim py as integer = 180 + (my - 300) \ 20
-        if px < 120 then px = 120
-        if px > 200 then px = 200
-        if py < 120 then py = 120
-        if py > 240 then py = 240
-        circle (px-15, py), 6, rgb(255, 255, 255), , , , f
-        circle (px+15, py), 6, rgb(255, 255, 255), , , , f
-        circle (px-15, py), 3, rgb(0, 0, 0), , , , f
-        circle (px+15, py), 3, rgb(0, 0, 0), , , , f
+        dim dx as integer = (mx - 400) \ 25
+        dim dy as integer = (my - 300) \ 25
+        if dx < -4 then dx = -4
+        if dx > 4 then dx = 4
+        if dy < -4 then dy = -4
+        if dy > 4 then dy = 4
+        circle (145 + dx, 170 + dy), 3, rgb(0, 0, 0), , , , f
+        circle (175 + dx, 170 + dy), 3, rgb(0, 0, 0), , , , f
+        ' nose and mouth
+        line (160, 178)-(160, 190), rgb(180, 140, 120)
+        circle (160, 198), 8, rgb(180, 100, 100), 4.7, 5.9
         draw string (110, 80), "PORTRAIT"
         ' office desk (3D cuboid with thin legs)
         line (300, 240)-(460, 240), rgb(130, 95, 60)
