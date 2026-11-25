@@ -666,7 +666,7 @@ function examineText(obj as string) as string
         case "palm scanner": return "It wants a palm with a career. Yours is still in beta."
         case "fish tank": return "Gerald the goldfish drifts inside, radiating the calm of a creature with no performance review."
         case "Gerald": return "Gerald the goldfish drifts inside, radiating the calm of a creature with no performance review."
-        case "vats": return "Vat 3 is labeled 'DO NOT SHAKE'. Vat 4 is labeled 'SHAKE WELL'. The lab runs on trust."
+        case "vats": return "Vat A is labeled 'DO NOT SHAKE'. Vat B is labeled 'SHAKE WELL'. The lab runs on trust."
         case "corkboard": return "A rota, three safety warnings, and a photo of last year's Science Fair trophy. Regional champions. Least explosions."
         case "rubber chicken": return "A rubber chicken. No label, no explanation, no apology."
         case "portrait": return "The plaque reads 'DR. A. FUMBLE, DIRECTOR'. The eyes read you."
@@ -845,7 +845,7 @@ function handleIntent(pc as ParsedCall) as string
         if item = "red herring" and target = "vats" then
             if hasItem("red herring") = 0 then return "You aren't holding that."
             removeItem("red herring")
-            return "Into Vat 3 (DO NOT SHAKE) it goes: a herring that refuses to be stirred. Into Vat 4 (SHAKE WELL) it goes: a herring that's well and truly shaken. Either way, it's a vat-astrophe."
+            return "Into Vat A (DO NOT SHAKE) it goes: a herring that refuses to be stirred. Into Vat B (SHAKE WELL) it goes: a herring that's well and truly shaken. Either way, it's a vat-astrophe."
         end if
         if item = "red herring" and target = "palm scanner" then
             return "Well, it's a little oily and smells of fish. What did you expect to happen?"
@@ -1002,6 +1002,8 @@ sub draw_room()
         line (442, 250)-(442, 300), rgb(100, 100, 120)
         line (498, 250)-(498, 300), rgb(100, 100, 120)
         circle (470, 300), 28, rgb(90, 90, 110), , , 0.45, f
+        draw string (345, 205), "A"
+        draw string (455, 205), "B"
         draw string (330, 210), "VATS"
         ' corkboard
         line (560, 140)-(680, 240), rgb(180, 140, 80), bf
