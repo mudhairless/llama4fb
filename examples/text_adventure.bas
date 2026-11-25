@@ -882,9 +882,18 @@ function handleIntent(pc as ParsedCall) as string
 end function
 
 ' ---------- drawing ----------
-sub draw_room_bg()
+sub draw_room_bg(byref room_name as const string = "Lobby")
+	dim wall_color as long = rgb(46,42,52)
+	select case room_name
+		case "Director's Office":
+			wall_color = rgb(200, 200, 150)
+		case "The Lab":
+			wall_color = rgb(175, 175, 175)
+		case "Break Room":
+			wall_color = rgb(80, 80, 200)
+	end select
     ' back wall
-    line (0, 40)-(SC_W-1, 300), rgb(46, 42, 52), bf
+    line (0, 40)-(SC_W-1, 300), wall_color, bf
     ' checkerboard floor in perspective
     const TCOLS = 8
     const TROWS = 6
@@ -920,51 +929,74 @@ sub draw_room()
     line (0, 0)-(SC_W-1, 40), rgb(40, 40, 60), bf
     draw string (10, 12), roomName(curRoom)
     ' semi-3D room background
-    draw_room_bg()
+    draw_room_bg(roomName(curRoom))
 
     if curRoom = 0 then
         ' walls/floor
         ' door
-        line (650, 120)-(720, 300), rgb(90, 60, 30), bf
-        line (650, 120)-(720, 300), rgb(200, 200, 200), b
+        line (650, 100)-(760, 300), rgb(90, 60, 30), bf
+        line (650, 100)-(760, 300), rgb(200, 200, 200), b
         if won = 1 then
             ' open door: draw gap
-            line (650, 120)-(685, 300), rgb(20, 20, 30), bf
+            line (650, 100)-(760, 300), rgb(90, 60, 30), b
+            line (650, 100)-(750, 300), rgb(20, 20, 30), bf
         end if
         ' scanner plate
         dim scol as uinteger
         if won = 1 then scol = rgb(0, 200, 0) else scol = rgb(200, 0, 0)
         circle (600, 210), 24, scol, , , , f
+        circle(600, 210), 10, rgb(200, 200, 100), , , 1.67, f
         line (576, 186)-(624, 234), rgb(200, 200, 200), b
         ' poster
-        line (80, 120)-(160, 200), rgb(240, 240, 200), bf
-        draw string (85, 150), "HANG IN"
+        view screen(80, 120)-(160,200)
+		line (80, 120)-(160, 200), rgb(240, 240, 200), bf
+        circle (150, 120), 50, rgb(0, 100, 0), , , , f
+        line (150, 135)-(160, 200), rgb(150, 110, 70), bf
+        line (90, 160)-(150, 165), rgb(150, 110, 70), bf
+        line (130, 160)-(135, 175), rgb(200, 50, 50), bf
+        line (110, 160)-(115, 175), rgb(200, 50, 50), bf
+        line (110, 175)-(135, 200), rgb(200, 200, 200), bf
+        circle (122, 180), 25, rgb(200, 50, 50), , , 0.2, f
+        draw string (85, 130), "HANG IN", rgb(20, 20, 20)
+        draw string (85, 145), "THERE", rgb(20, 20, 20)
+        view
         ' rubber plant (3D pot + foliage)
+        'pot
+        circle (260, 270), 15, rgb(110, 70, 40), , , 0.2, f
         line (245, 270)-(275, 270), rgb(110, 70, 40), bf
-        line (240, 270)-(245, 300), rgb(110, 70, 40)
-        line (275, 270)-(280, 300), rgb(110, 70, 40)
-        line (245, 300)-(275, 300), rgb(110, 70, 40)
-        circle (260, 245), 26, rgb(40, 120, 40), , , , f
-        circle (248, 235), 16, rgb(50, 140, 50), , , , f
-        circle (272, 238), 14, rgb(30, 110, 40), , , , f
+        line (245, 270)-(247, 300), rgb(110, 70, 40)
+        line (275, 270)-(273, 300), rgb(110, 70, 40)
+        'line (245, 300)-(275, 300), rgb(110, 70, 40)
+        circle (260, 300), 13, rgb(110, 70, 40), , , 0.2, f
+        paint (260, 280), rgb(110, 70, 40), rgb(110, 70, 40)
+        circle (260, 270), 15, rgb(40, 70, 40), , , 0.2, f
+        'foliage
+        line (257, 205)-(263, 270), rgb(150, 110, 70), bf
+        circle (260, 215), 26, rgb(40, 120, 40), , , , f
+        circle (248, 205), 16, rgb(50, 140, 50), , , , f
+        circle (272, 208), 14, rgb(30, 110, 40), , , , f
         ' reception desk (3D cuboid with thin legs)
         line (360, 240)-(520, 240), rgb(150, 110, 70)
         line (520, 240)-(540, 260), rgb(150, 110, 70)
         line (540, 260)-(380, 260), rgb(150, 110, 70)
+        '
         line (380, 260)-(360, 240), rgb(150, 110, 70)
         paint (440, 250), rgb(150, 110, 70), rgb(150, 110, 70)
-        line (360, 240)-(360, 300), rgb(120, 90, 60)
-        line (520, 240)-(520, 300), rgb(120, 90, 60)
-        line (360, 300)-(520, 300), rgb(120, 90, 60)
+        line (360, 240)-(360, 280), rgb(120, 90, 60)
+		line (380, 260)-(380, 300), rgb(120, 90, 60) 'left front edge
+		line (360, 280)-(380, 300), rgb(120, 90, 60)
+        line (380, 300)-(520, 300), rgb(120, 90, 60)
         line (520, 240)-(540, 260), rgb(100, 75, 50)
         line (540, 260)-(540, 300), rgb(100, 75, 50)
         line (520, 300)-(540, 300), rgb(100, 75, 50)
+        'paint (350, 270), rgb(120, 90, 60), rgb(120, 90, 60)
+
         ' thin legs
-        line (365, 300)-(365, 325), rgb(90, 65, 40)
-        line (515, 300)-(515, 325), rgb(90, 65, 40)
+        line (365, 285)-(365, 305), rgb(90, 65, 40)
+        line (515, 300)-(515, 305), rgb(90, 65, 40)
         line (385, 300)-(385, 325), rgb(90, 65, 40)
         line (535, 300)-(535, 325), rgb(90, 65, 40)
-        draw string (370, 270), "DESK"
+        draw string (420, 270), "DESK"
     elseif curRoom = 1 then
         ' table for tank
         line (100, 285)-(240, 285), rgb(100, 70, 40)
