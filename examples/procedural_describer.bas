@@ -718,12 +718,13 @@ do
     dim nowSpace as integer = multikey(FB.SC_SPACE)
     dim nowTab as integer = multikey(FB.SC_TAB)
 
-    if nowUp = 1 and lastUp = 0 then try_move(0, -1)
-    if nowDown = 1 and lastDown = 0 then try_move(0, 1)
-    if nowLeft = 1 and lastLeft = 0 then try_move(-1, 0)
-    if nowRight = 1 and lastRight = 0 then try_move(1, 0)
-    if nowSpace = 1 and lastSpace = 0 then interact_press()
-    if nowTab = 1 and lastTab = 0 then
+    ' multikey returns -1 while a key is held, 0 when it is up
+    if nowUp <> 0 and lastUp = 0 then try_move(0, -1)
+    if nowDown <> 0 and lastDown = 0 then try_move(0, 1)
+    if nowLeft <> 0 and lastLeft = 0 then try_move(-1, 0)
+    if nowRight <> 0 and lastRight = 0 then try_move(1, 0)
+    if nowSpace <> 0 and lastSpace = 0 then interact_press()
+    if nowTab <> 0 and lastTab = 0 then
         debugOn = 1 - debugOn
         draw_all()
     end if
