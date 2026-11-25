@@ -7,6 +7,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 LLAMA_CPP="${1:-${LLAMA_CPP_DIR:-}}"
 if [ -z "$LLAMA_CPP" ]; then
