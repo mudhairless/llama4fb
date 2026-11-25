@@ -1010,8 +1010,25 @@ sub draw_room()
         draw string (570, 150), "BOARD"
         ' rubber chicken
         if chickenTaken = 0 then
-            line (500, 280)-(560, 300), rgb(220, 200, 60), bf
-            draw string (500, 265), "CHICKEN"
+            ' stereotypical rubber chicken
+            circle (525, 285), 14, rgb(230, 200, 60), , , 1.3, f
+            circle (545, 272), 9, rgb(230, 200, 60), , , , f
+            ' beak
+            line (553, 270)-(566, 266), rgb(230, 120, 40)
+            line (553, 274)-(566, 278), rgb(230, 120, 40)
+            line (566, 266)-(566, 278), rgb(230, 120, 40)
+            ' comb
+            circle (544, 262), 4, rgb(220, 40, 40), , , , f
+            circle (540, 260), 3, rgb(220, 40, 40), , , , f
+            circle (548, 260), 3, rgb(220, 40, 40), , , , f
+            ' wattle
+            circle (548, 280), 3, rgb(220, 40, 40), , , , f
+            ' wing
+            circle (520, 282), 8, rgb(200, 170, 40), , , 0.6, f
+            ' legs
+            line (522, 295)-(520, 312), rgb(230, 180, 60)
+            line (532, 295)-(534, 312), rgb(230, 180, 60)
+            draw string (505, 260), "CHICKEN"
         end if
     elseif curRoom = 2 then
         ' portrait
