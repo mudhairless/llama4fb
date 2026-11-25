@@ -37,6 +37,8 @@ To use a separate checkout instead, pass its path as the first argument or set
 `LLAMA_CPP_DIR` (and optionally `LLAMA_BUILD_DIR`); an explicit path always
 wins over the submodule.
 
+**Windows:** The build/run scripts are POSIX shell and do not run on Windows. From a Developer PowerShell at the repo root, run `tools/build-windows.ps1` (add `-Cuda` for GPU offload): it builds the vendored llama.cpp as shared libraries into `vendor/llama.cpp/build-windows` and generates the `lib*.dll.a` import libraries FreeBASIC needs, beside the DLLs in the build's `bin/Release` folder. Compile an example from `examples/` with the Windows fbc, pointing `-p` at that folder, e.g. `fbc hello_llama.bas -p ..\vendor\llama.cpp\build-windows\bin\Release -l llama -l ggml -l ggml-base -l ggml-cpu`, and copy the DLLs next to the resulting `.exe` (or add the folder to `PATH`) before running it. *This route follows the fork's documented Windows build; the script is new and has not yet been tested end to end on Windows.*
+
 ## Layout
 
 - `inc/llama.bi` — top-level header (includes `inc/ggml/*.bi`).
