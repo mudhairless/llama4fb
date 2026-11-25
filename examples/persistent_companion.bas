@@ -7,9 +7,9 @@
 ' and the whole state is saved to disk and can be loaded again. This is the
 ' deliberate contrast with text_adventure, which restarts context on every
 ' turn. The conversation is now presented in an fbgfx window: a ship readout
-' on the left, Pip's eye on the right, a wrapped log in the middle and a
-' three-line input box at the bottom - the presentation model of
-' text_adventure, adapted for a chat.
+' on the left, a context gauge between the panels, Pip's eye on the right, a
+' wrapped log in the middle and a three-line input box at the bottom - the
+' presentation model of text_adventure, adapted for a chat.
 '
 ' Deliberate limitations: no summarization and no sliding window when the
 ' context fills - the wall is shown honestly and only "quit" is accepted.
@@ -37,6 +37,12 @@ const LOG_BOTTOM = 500
 const INPUT_TOP = 506
 const INPUT_WRAP = 96
 const INPUT_LINES = 3
+const CTX_BAR_X = 484
+const CTX_BAR_W = 15
+const CTX_BAR_TOP = 10
+const CTX_LED_COUNT = 18
+const CTX_LED_H = 6
+const CTX_LED_GAP = 3
 
 const SESSION_FILE = "persistent_companion.session"
 const NOTES_FILE   = "persistent_companion.notes"
@@ -89,7 +95,6 @@ dim shared demoAbort as integer = 0
 dim shared g_stopped as integer = 0
 dim shared g_quit as integer = 0
 dim shared inputBuf as string
-dim shared g_ctxLine as string
 ' 0 idle, 1 generating, 2 tool blink
 dim shared g_pipState as integer = 0
 dim shared g_toolBlinkUntil as double = 0
@@ -526,13 +531,40 @@ sub draw_dome(cx as integer, cy as integer, r as integer, col as uinteger)
     next
 end sub
 
+' vertical context gauge: LED chunks green at the bottom, red at the top.
+' The fill grows upward, so the topmost LED lights only at a full context.
+sub draw_ctx_bar()
+    dim frameBottom as integer = CTX_BAR_TOP + CTX_LED_COUNT * (CTX_LED_H + CTX_LED_GAP)
+    line (CTX_BAR_X-2, CTX_BAR_TOP-2)-(CTX_BAR_X+CTX_BAR_W+1, frameBottom), rgb(18, 22, 34), bf
+    line (CTX_BAR_X-2, CTX_BAR_TOP-2)-(CTX_BAR_X+CTX_BAR_W+1, frameBottom), rgb(70, 80, 100), b
+
+    dim ratio as double = 0
+    if g_ctxSize > 0 then ratio = nAllTok / g_ctxSize
+    if ratio < 0 then ratio = 0
+    if ratio > 1 then ratio = 1
+    dim lit as integer = int(ratio * CTX_LED_COUNT + 0.9999)
+
+    for i as integer = 0 to CTX_LED_COUNT-1
+        dim f as double = i / (CTX_LED_COUNT-1)
+        dim lr as integer = int(60 + 170*f)
+        dim lg as integer = int(220 - 170*f)
+        dim lb as integer = int(90 - 50*f)
+        dim y as integer = CTX_BAR_TOP + (CTX_LED_COUNT-1-i) * (CTX_LED_H + CTX_LED_GAP)
+        if i < lit then
+            line (CTX_BAR_X, y)-(CTX_BAR_X+CTX_BAR_W-1, y+CTX_LED_H-1), rgb(lr, lg, lb), bf
+        else
+            line (CTX_BAR_X, y)-(CTX_BAR_X+CTX_BAR_W-1, y+CTX_LED_H-1), rgb(int(lr*0.22), int(lg*0.22), int(lb*0.22)), bf
+        end if
+    next
+end sub
+
 sub draw_header_body()
     line (0, 0)-(SC_W-1, 175), rgb(12, 14, 24), bf
     line (499, 0)-(499, 175), rgb(80, 90, 110)
 
     ' ---------- left: the ship readout ----------
     for gy as integer = 16 to 160 step 32
-        line (0, gy)-(498, gy), rgb(20, 26, 40)
+        line (0, gy)-(480, gy), rgb(20, 26, 40)
     next
     for gx as integer = 40 to 480 step 40
         line (gx, 0)-(gx, 100), rgb(18, 22, 36)
@@ -587,8 +619,8 @@ sub draw_header_body()
     draw string (18, 130), "drive temp: " & str(dtemp) & " C", rgb(120, 200, 200)
     draw string (18, 142), "veil survey: " & str(prog) & "%", rgb(120, 200, 200)
     draw string (18, 154), "sensors: " & sstat, rgb(120, 200, 200)
-    ' the real budget, updated after every turn
-    draw string (18, 166), g_ctxLine, rgb(230, 200, 120)
+    ' the real budget lives in the LED bar between the readout and Pip
+    draw_ctx_bar()
 
     ' ---------- right: Pip ----------
     line (502, 4)-(796, 171), rgb(8, 10, 16), bf
@@ -648,10 +680,6 @@ sub draw_window()
         y += 12
     next
     screenunlock
-end sub
-
-sub refresh_ctx_line()
-    g_ctxLine = "context: " & str(nAllTok) & "/" & str(g_ctxSize) & " tokens"
 end sub
 
 ' ---------- tool definitions, built with fbejson (never by string concatenation) ----------
@@ -819,7 +847,6 @@ sub fresh_session()
         nAllTok = nTok
     end if
     kvMsgIndex = nMsg
-    refresh_ctx_line()
     file_log "FRESH tokens=" & str(nAllTok)
 end sub
 
@@ -839,7 +866,6 @@ function load_session() as integer
     ' the whole history is already in the restored KV cache; only new turns
     ' will be decoded from here on.
     kvMsgIndex = nMsg
-    refresh_ctx_line()
     ui_log "Conversation resumed from " & SESSION_FILE
     file_log "LOAD tokens=" & str(nAllTok)
     return 1
@@ -905,7 +931,6 @@ function generate_reply(delta as string) as string
     if nAllTok + nTok + 256 >= g_ctxSize then
         g_stopped = 1
         g_pipState = 0
-        refresh_ctx_line()
         ui_log STOP_LINE
         file_log STOP_LINE
         draw_window()
@@ -925,7 +950,6 @@ function generate_reply(delta as string) as string
         if demoMode = 1 andalso inkey = chr(27) then demoAbort = 1: exit while
         if nAllTok + 1 >= g_ctxSize then
             g_stopped = 1
-            refresh_ctx_line()
             ui_log STOP_LINE
             file_log STOP_LINE
             exit while
@@ -945,7 +969,6 @@ function generate_reply(delta as string) as string
         if (nGen mod 8) = 0 then draw_header()
     wend
     g_pipState = 0
-    refresh_ctx_line()
 
     dim filtered as string = ""
     for i as integer = 1 to len(result)
@@ -1172,7 +1195,6 @@ sub process_input(byval userInput as string)
     dim status as string = "context: " & str(nAllTok) & "/" & str(g_ctxSize) & " tokens"
     ui_log status
     file_log status
-    refresh_ctx_line()
     draw_window()
     log_recall(userInput, reply)
     save_session()
@@ -1182,7 +1204,6 @@ end sub
 randomize timer
 screenres SC_W, SC_H, 32
 windowtitle "Pip - survey vessel Cartographer"
-refresh_ctx_line()
 
 for ai as integer = 1 to 12
     if command(ai) = "--log" or command(ai) = "-log" then logging = 1
