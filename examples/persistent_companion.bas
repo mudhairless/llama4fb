@@ -573,15 +573,15 @@ sub draw_ctx_bar()
     next
 end sub
 
-' Pip is a small survey drone: two amber eyes, a smile, a bobbing antenna and
-' thinking arcs that spin while a reply streams. Not a red monolith.
+' Pip is a flat comms face: two eyes and a mouth on a chamfered display.
+' No antenna, no pods, no round shell to read as somebody else's mascot.
 sub draw_pip()
     line (502, 4)-(796, 171), rgb(8, 10, 16), bf
     line (502, 4)-(796, 171), rgb(80, 110, 120), b
 
     dim cx as integer = 650
-    dim bob as integer = int(3 * sin(timer * 1.3))
-    dim cy as integer = 70 + bob
+    dim bob as integer = int(2 * sin(timer * 1.2))
+    dim cy as integer = 64 + bob
     dim thinking as integer = 0
     dim flashing as integer = 0
     if g_pipState = 1 then thinking = 1
@@ -593,75 +593,65 @@ sub draw_pip()
     elseif flashing = 1 then
         if int((g_toolBlinkUntil - timer) * 8) mod 2 = 0 then bright = 1.0 else bright = 0.22
     end if
-    dim eyeC as uinteger = rgb(int(120 + 110*bright), int(90 + 115*bright), int(55 + 80*bright))
-    dim gleamC as uinteger = rgb(int(170 + 80*bright), int(150 + 90*bright), int(120 + 100*bright))
+    dim eyeC as uinteger = rgb(int(150 + 90*bright), int(110 + 100*bright), int(60 + 70*bright))
+    dim mouthC as uinteger = rgb(int(130 + 80*bright), int(160 + 80*bright), int(140 + 70*bright))
+    dim plateC as uinteger = rgb(int(24 + 16*bright), int(48 + 20*bright), int(58 + 22*bright))
 
-    ' antenna bead bobs and brightens while thinking
-    line (cx, cy-40)-(cx, cy-56), rgb(110, 150, 160)
-    dim beadY as integer = cy - 58 + int(2 * sin(timer * (2.2 + thinking * 3)))
-    circle (cx, beadY), 4, eyeC, , , 1, f
+    ' chamfered display, drawn as horizontal slices
+    for y as integer = cy-30 to cy+30
+        dim inset as integer = 0
+        if y < cy-18 then inset = cy-18-y
+        if y > cy+18 then inset = y-(cy+18)
+        line (558+inset, y)-(742-inset, y), plateC
+    next
+    line (570, cy-30)-(730, cy-30), rgb(110, 160, 170)
+    line (730, cy-30)-(742, cy-18), rgb(110, 160, 170)
+    line (742, cy-18)-(742, cy+18), rgb(110, 160, 170)
+    line (742, cy+18)-(730, cy+30), rgb(110, 160, 170)
+    line (730, cy+30)-(570, cy+30), rgb(110, 160, 170)
+    line (570, cy+30)-(558, cy+18), rgb(110, 160, 170)
+    line (558, cy+18)-(558, cy-18), rgb(110, 160, 170)
+    line (558, cy-18)-(570, cy-30), rgb(110, 160, 170)
 
-    ' side pods
-    circle (cx-50, cy), 9, rgb(40, 70, 82), , , 1, f
-    circle (cx+50, cy), 9, rgb(40, 70, 82), , , 1, f
-    circle (cx-50, cy), 4, rgb(90, 140, 150), , , 1, f
-    circle (cx+50, cy), 4, rgb(90, 140, 150), , , 1, f
-
-    ' rounded shell, face plate, visor and a highlight on the crown
-    circle (cx, cy), 52, rgb(58, 96, 110), , , 0.78, f
-    circle (cx, cy-2), 46, rgb(112, 155, 165), , , 0.76, f
-    circle (cx, cy), 38, rgb(16, 30, 40), , , 0.62, f
-    circle (cx, cy-6), 40, rgb(150, 195, 200), 3.4, 5.6, 0.6
-
-    ' eyes dart while processing; blink when idle or during a tool flash
+    ' eyes wander while processing; blink at rest or during a tool flash
     dim dx as integer = 0
     dim dy as integer = 0
     if thinking = 1 then
-        dx = int(3 * sin(timer * 6.1))
+        dx = int(4 * sin(timer * 6.1))
         dy = int(2 * sin(timer * 4.3))
     end if
     dim blinking as integer = 0
     if flashing = 1 then blinking = 1
     if thinking = 0 and flashing = 0 and (timer mod 3.2) < 0.18 then blinking = 1
     for side as integer = -1 to 1 step 2
-        dim ex as integer = cx + side*14 + dx
-        dim ey as integer = cy - 2 + dy
+        dim ex as integer = cx + side*30 + dx
+        dim ey as integer = cy - 8 + dy
         if blinking = 1 then
-            line (ex-6, ey)-(ex+6, ey), eyeC
+            line (ex-11, ey)-(ex+11, ey), eyeC
         else
-            circle (ex, ey), 6, eyeC, , , 1, f
-            circle (ex-2, ey-2), 2, gleamC, , , 1, f
+            circle (ex, ey), 12, eyeC, , , 0.55, f
+            circle (ex-4, ey-2), 2, rgb(240, 230, 190), , , 1, f
         end if
     next
 
-    ' smile at rest, small voice meter while thinking
+    ' a smile at rest, a small waveform mouth while speaking
     if thinking = 0 then
-        circle (cx, cy+12), 11, rgb(180, 200, 170), 3.7, 5.7, 0.5
+        circle (cx, cy+10), 14, mouthC, 3.7, 5.7, 0.55
     else
-        for i as integer = 0 to 4
-            dim bh as integer = 3 + abs(int(8 * sin(timer * 7 + i * 0.9)))
-            line (cx-16+i*8, cy+20-bh)-(cx-16+i*8, cy+20), eyeC
+        for i as integer = 0 to 6
+            dim mh as integer = 2 + abs(int(7 * sin(timer * 8 + i * 0.8)))
+            dim mx as integer = cx-24 + i*8
+            line (mx, cy+18-mh)-(mx, cy+18+mh\2), mouthC
         next
     end if
 
-    ' a small status bead keeps circling at rest
-    if thinking = 0 and flashing = 0 then
-        dim aa as double = timer * 0.9
-        circle (int(cx + 56*cos(aa)), int(cy + 45*sin(aa))), 2, rgb(90, 160, 160), , , 1, f
-    end if
-
-    ' thinking arcs orbit the shell; a tool flash sends a ring outward
-    if thinking = 1 then
-        dim a as double = timer * 1.8
-        circle (cx, cy), 62, rgb(120, 200, 190), a, a + 1.1, 0.8
-        circle (cx, cy), 62, rgb(120, 200, 190), a + 3.14, a + 4.24, 0.8
-        circle (cx, cy), 67, rgb(80, 150, 150), a + 1.6, a + 2.4, 0.8
-    end if
+    ' a tool flash sweeps a bright line across the display
     if flashing = 1 then
         dim ph as double = 1 - (g_toolBlinkUntil - timer) / 0.7
         if ph < 0 then ph = 0
         if ph > 1 then ph = 1
-        circle (cx, cy), 54 + int(14*ph), rgb(220, 190, 110), , , 0.8
+        dim sx as integer = 566 + int(168*ph)
+        line (sx, cy-28)-(sx, cy+28), rgb(235, 205, 120)
     end if
 
     draw string (638, 130), "PIP", rgb(200, 220, 190)
