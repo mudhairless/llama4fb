@@ -13,9 +13,13 @@ INC_DIR="$PROJECT_DIR/inc"
 
 LLAMA_CPP="${1:-${LLAMA_CPP_DIR:-}}"
 if [ -z "$LLAMA_CPP" ]; then
-    echo "Usage: $0 /path/to/llama.cpp" >&2
-    echo "       (or set LLAMA_CPP_DIR)" >&2
-    exit 2
+    LLAMA_CPP="$PROJECT_DIR/vendor/llama.cpp"
+    USING_SUBMODULE=1
+    if [ ! -f "$LLAMA_CPP/CMakeLists.txt" ]; then
+        echo "llama.cpp submodule not populated at $LLAMA_CPP" >&2
+        echo "Run: git submodule update --init" >&2
+        exit 1
+    fi
 fi
 LLAMA_CPP="$(cd "$LLAMA_CPP" && pwd)"
 
@@ -27,6 +31,11 @@ elif [ -f "$LLAMA_CPP/build-cuda/bin/libggml-cuda.so" ]; then
     BUILD="$LLAMA_CPP/build-cuda/bin"
 elif [ -f "$LLAMA_CPP/build-vulkan/bin/libggml-vulkan.so" ]; then
     BUILD="$LLAMA_CPP/build-vulkan/bin"
+elif [ -n "${USING_SUBMODULE:-}" ] && [ ! -d "$LLAMA_CPP/build-cuda/bin" ] && [ ! -d "$LLAMA_CPP/build-vulkan/bin" ] && [ ! -d "$LLAMA_CPP/build/bin" ]; then
+    echo "Vendored llama.cpp has no build tree. From vendor/llama.cpp, run:" >&2
+    echo "  cmake -B build-cuda -DGGML_CUDA=ON" >&2
+    echo "  cmake --build build-cuda --config Release -j" >&2
+    exit 1
 else
     BUILD="$LLAMA_CPP/build/bin"
 fi

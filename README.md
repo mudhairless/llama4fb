@@ -7,13 +7,35 @@ Use them to call llama.cpp from FreeBASIC programs.
 ## What you need
 
 - **FreeBASIC** with `fbc` on your `PATH` (tested with 1.10.x).
-- A checkout of the **krafton-ai/llama.cpp** fork, branch `raon-1-nano`, built
-  as shared libraries (`libllama`, `libggml`, `libggml-base`, `libggml-cpu`,
-  and `libggml-cuda` if you want GPU offload). Either `build/bin` or
-  `build-cuda/bin` works; the scripts prefer `build-cuda` when present.
+- The vendored **krafton-ai/llama.cpp** fork at `vendor/llama.cpp` (branch
+  `raon-1-nano`), built as shared libraries (`libllama`, `libggml`,
+  `libggml-base`, `libggml-cpu`, and `libggml-cuda` for GPU offload). This is
+  the scripts' default location. Either `build/bin` or `build-cuda/bin` works;
+  the scripts prefer `build-cuda` when present.
 - A GGUF model. The examples target `raon-1-nano-Q4_K_M.gguf` and download it
   automatically on first run.
-- (Optional) CUDA toolkit + a CUDA build of the fork for GPU offload.
+- (Optional but recommended) CUDA toolkit for the vendored CUDA build.
+
+## Set up llama.cpp
+
+After cloning, initialize the submodule and build its CUDA tree once:
+
+```sh
+git submodule update --init
+cd vendor/llama.cpp
+cmake -B build-cuda -DGGML_CUDA=ON
+cmake --build build-cuda --config Release -j
+```
+
+With no path given, the scripts use `vendor/llama.cpp`, choosing
+`build-cuda/bin` when `libggml-cuda.so` is present, then `build-vulkan/bin`,
+then `build/bin`. If the submodule is empty, they tell you to run
+`git submodule update --init`; if it has no build tree, they print the cmake
+commands above.
+
+To use a separate checkout instead, pass its path as the first argument or set
+`LLAMA_CPP_DIR` (and optionally `LLAMA_BUILD_DIR`); an explicit path always
+wins over the submodule.
 
 ## Layout
 
@@ -24,16 +46,21 @@ Use them to call llama.cpp from FreeBASIC programs.
 
 ## Build & run an example
 
-The scripts take the path to your llama.cpp fork as the first argument (or via
-`LLAMA_CPP_DIR`):
+From `examples/`, the scripts default to the vendored tree:
 
 ```sh
 cd examples
+./build_rpg.sh
+./run_rpg.sh
+```
+
+The same works for `animal_tank` and `hello_llama`. To use a separate
+checkout, pass its path as the first argument (or set `LLAMA_CPP_DIR`):
+
+```sh
 ./build_rpg.sh /path/to/llama.cpp
 ./run_rpg.sh /path/to/llama.cpp
 ```
-
-The same works for `animal_tank` and `hello_llama`.
 
 ## Super basic example
 
@@ -76,18 +103,21 @@ print
 Build and run it (from the `examples/` directory):
 
 ```sh
-./build_hello_llama.sh /path/to/llama.cpp
+./build_hello_llama.sh
 ./hello_llama
 ```
 
-Or compile directly (from the project root):
+Or compile directly against the vendored build (from the project root):
 
 ```sh
-fbc -i ./inc examples/hello_llama.bas -p /path/to/llama.cpp/build/bin \
-    -l llama -l ggml -l ggml-base -l ggml-cpu \
+fbc -i ./inc examples/hello_llama.bas -p vendor/llama.cpp/build-cuda/bin \
+    -l llama -l ggml -l ggml-base -l ggml-cpu -l ggml-cuda \
     -x examples/hello_llama
-cd examples && LD_LIBRARY_PATH=/path/to/llama.cpp/build/bin ./hello_llama
+cd examples && LD_LIBRARY_PATH=../vendor/llama.cpp/build-cuda/bin ./hello_llama
 ```
+
+A separate checkout still works: pass it as the first argument to the build
+script, or replace the `-p` / `LD_LIBRARY_PATH` paths above.
 
 ## Verifying the headers
 
