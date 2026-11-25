@@ -7,7 +7,7 @@
 ' and the whole state is saved to disk and can be loaded again. This is the
 ' deliberate contrast with text_adventure, which restarts context on every
 ' turn. The conversation is now presented in an fbgfx window: a ship readout
-' on the left, a context gauge between the panels, Pip's eye on the right, a
+' on the left, a context gauge between the panels, Pip's face on the right, a
 ' wrapped log in the middle and a three-line input box at the bottom - the
 ' presentation model of text_adventure, adapted for a chat.
 '
@@ -558,6 +558,101 @@ sub draw_ctx_bar()
     next
 end sub
 
+' Pip is a small survey drone: two amber eyes, a smile, a bobbing antenna and
+' thinking arcs that spin while a reply streams. Not a red monolith.
+sub draw_pip()
+    line (502, 4)-(796, 171), rgb(8, 10, 16), bf
+    line (502, 4)-(796, 171), rgb(80, 110, 120), b
+
+    dim cx as integer = 650
+    dim bob as integer = int(3 * sin(timer * 1.3))
+    dim cy as integer = 70 + bob
+    dim thinking as integer = 0
+    dim flashing as integer = 0
+    if g_pipState = 1 then thinking = 1
+    if g_pipState = 2 andalso timer < g_toolBlinkUntil then flashing = 1
+
+    dim bright as double = 0.32
+    if thinking = 1 then
+        bright = 0.72 + 0.28 * (0.5 + 0.5 * sin(timer * 3.2))
+    elseif flashing = 1 then
+        if int((g_toolBlinkUntil - timer) * 8) mod 2 = 0 then bright = 1.0 else bright = 0.22
+    end if
+    dim eyeC as uinteger = rgb(int(120 + 110*bright), int(90 + 115*bright), int(55 + 80*bright))
+    dim gleamC as uinteger = rgb(int(170 + 80*bright), int(150 + 90*bright), int(120 + 100*bright))
+
+    ' antenna bead bobs and brightens while thinking
+    line (cx, cy-40)-(cx, cy-56), rgb(110, 150, 160)
+    dim beadY as integer = cy - 58 + int(2 * sin(timer * (2.2 + thinking * 3)))
+    circle (cx, beadY), 4, eyeC, , , 1, f
+
+    ' side pods
+    circle (cx-50, cy), 9, rgb(40, 70, 82), , , 1, f
+    circle (cx+50, cy), 9, rgb(40, 70, 82), , , 1, f
+    circle (cx-50, cy), 4, rgb(90, 140, 150), , , 1, f
+    circle (cx+50, cy), 4, rgb(90, 140, 150), , , 1, f
+
+    ' rounded shell, face plate, visor and a highlight on the crown
+    circle (cx, cy), 52, rgb(58, 96, 110), , , 0.78, f
+    circle (cx, cy-2), 46, rgb(112, 155, 165), , , 0.76, f
+    circle (cx, cy), 38, rgb(16, 30, 40), , , 0.62, f
+    circle (cx, cy-6), 40, rgb(150, 195, 200), 3.4, 5.6, 0.6
+
+    ' eyes dart while processing; blink when idle or during a tool flash
+    dim dx as integer = 0
+    dim dy as integer = 0
+    if thinking = 1 then
+        dx = int(3 * sin(timer * 6.1))
+        dy = int(2 * sin(timer * 4.3))
+    end if
+    dim blinking as integer = 0
+    if flashing = 1 then blinking = 1
+    if thinking = 0 and flashing = 0 and (timer mod 3.2) < 0.18 then blinking = 1
+    for side as integer = -1 to 1 step 2
+        dim ex as integer = cx + side*14 + dx
+        dim ey as integer = cy - 2 + dy
+        if blinking = 1 then
+            line (ex-6, ey)-(ex+6, ey), eyeC
+        else
+            circle (ex, ey), 6, eyeC, , , 1, f
+            circle (ex-2, ey-2), 2, gleamC, , , 1, f
+        end if
+    next
+
+    ' smile at rest, small voice meter while thinking
+    if thinking = 0 then
+        circle (cx, cy+12), 11, rgb(180, 200, 170), 3.7, 5.7, 0.5
+    else
+        for i as integer = 0 to 4
+            dim bh as integer = 3 + abs(int(8 * sin(timer * 7 + i * 0.9)))
+            line (cx-16+i*8, cy+20-bh)-(cx-16+i*8, cy+20), eyeC
+        next
+    end if
+
+    ' a small status bead keeps circling at rest
+    if thinking = 0 and flashing = 0 then
+        dim aa as double = timer * 0.9
+        circle (int(cx + 56*cos(aa)), int(cy + 45*sin(aa))), 2, rgb(90, 160, 160), , , 1, f
+    end if
+
+    ' thinking arcs orbit the shell; a tool flash sends a ring outward
+    if thinking = 1 then
+        dim a as double = timer * 1.8
+        circle (cx, cy), 62, rgb(120, 200, 190), a, a + 1.1, 0.8
+        circle (cx, cy), 62, rgb(120, 200, 190), a + 3.14, a + 4.24, 0.8
+        circle (cx, cy), 67, rgb(80, 150, 150), a + 1.6, a + 2.4, 0.8
+    end if
+    if flashing = 1 then
+        dim ph as double = 1 - (g_toolBlinkUntil - timer) / 0.7
+        if ph < 0 then ph = 0
+        if ph > 1 then ph = 1
+        circle (cx, cy), 54 + int(14*ph), rgb(220, 190, 110), , , 0.8
+    end if
+
+    draw string (638, 130), "PIP", rgb(200, 220, 190)
+    draw string (602, 148), "CARTOGRAPHER", rgb(130, 160, 165)
+end sub
+
 sub draw_header_body()
     line (0, 0)-(SC_W-1, 175), rgb(12, 14, 24), bf
     line (499, 0)-(499, 175), rgb(80, 90, 110)
@@ -623,26 +718,7 @@ sub draw_header_body()
     draw_ctx_bar()
 
     ' ---------- right: Pip ----------
-    line (502, 4)-(796, 171), rgb(8, 10, 16), bf
-    line (502, 4)-(796, 171), rgb(110, 65, 60), b
-    circle (650, 70), 44, rgb(80, 45, 45)
-    circle (650, 70), 39, rgb(45, 25, 28)
-
-    dim glow as double = 0.12
-    if g_pipState = 1 then
-        glow = 0.55 + 0.45 * (0.5 + 0.5 * sin(timer * 3.2))
-    elseif g_pipState = 2 andalso timer < g_toolBlinkUntil then
-        if int((g_toolBlinkUntil - timer) * 8) mod 2 = 0 then glow = 1.0 else glow = 0.2
-    end if
-    dim outerC as uinteger = rgb(int(60 + 110*glow), int(20 + 30*glow), int(18 + 14*glow))
-    dim innerC as uinteger = rgb(int(110 + 130*glow), int(35 + 55*glow), int(22 + 25*glow))
-    dim coreC  as uinteger = rgb(int(160 + 90*glow), int(60 + 90*glow), int(30 + 50*glow))
-    circle (650, 70), 30, outerC, , , , f
-    circle (650, 70), 21, innerC, , , , f
-    circle (650, 70), 11, coreC, , , , f
-    circle (644, 65), 3, rgb(int(160+90*glow), int(140+100*glow), int(120+100*glow)), , , , f
-    draw string (638, 130), "PIP", rgb(230, 120, 90)
-    draw string (602, 148), "CARTOGRAPHER", rgb(140, 110, 110)
+    draw_pip()
 end sub
 
 sub draw_header()
@@ -840,7 +916,9 @@ sub fresh_session()
     dim nTok as integer = llama_tokenize(g_vocab, strptr(initial), len(initial), @promptToks(0), 16384, 1, 1)
     if nTok <= 0 then nTok = -nTok
     if nTok > 0 then
+        g_pipState = 1
         decode_tokens(@promptToks(0), nTok, 0, 1)
+        g_pipState = 0
         for i as integer = 0 to nTok-1
             allToks(i) = promptToks(i)
         next
@@ -883,6 +961,7 @@ end sub
 ' ---------- decode / generate ----------
 sub decode_tokens(tks as llama_token ptr, n as integer, startPos as integer, wantLogits as integer)
     if n <= 0 then return
+    if n > 32 then draw_header()
     dim b as llama_batch = llama_batch_init(n, 0, 1)
     dim tp as llama_token ptr = b.token
     dim pp as llama_pos ptr = b.pos
@@ -900,6 +979,7 @@ sub decode_tokens(tks as llama_token ptr, n as integer, startPos as integer, wan
     b.n_tokens = n
     llama_decode(g_ctx, b)
     llama_batch_free(b)
+    if n > 32 then draw_header()
 end sub
 
 function build_delta() as string
@@ -965,8 +1045,8 @@ function generate_reply(delta as string) as string
         allToks(nAllTok) = tok
         nAllTok += 1
         nGen += 1
-        ' the eye pulses while tokens stream; the rest of the window can wait
-        if (nGen mod 8) = 0 then draw_header()
+        ' keep the face moving while tokens stream
+        draw_header()
     wend
     g_pipState = 0
 
@@ -1214,8 +1294,12 @@ for ai as integer = 1 to 12
     end if
 next
 
+g_pipState = 1
+ui_log "Waking Pip..."
+draw_window()
 init_tools()
 llm_init()
+g_pipState = 0
 file_log "=== SESSION START === ctx=" & str(g_ctxSize)
 
 dim resumed as integer = 0
