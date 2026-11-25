@@ -9,6 +9,8 @@ examples/persistent_companion
 examples/*.mp4
 examples/debug_cmd.txt
 examples/*.log
+examples/*.notes
+examples/*.session
 *.o
 
 # FreeBASIC stdbool shim (now vendored in inc/, but keep temp out)
