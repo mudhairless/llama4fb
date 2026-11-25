@@ -37,7 +37,11 @@ To use a separate checkout instead, pass its path as the first argument or set
 `LLAMA_CPP_DIR` (and optionally `LLAMA_BUILD_DIR`); an explicit path always
 wins over the submodule.
 
-**Windows:** The build/run scripts are POSIX shell and do not run on Windows. From a Developer PowerShell at the repo root, run `tools/build-windows.ps1` (add `-Cuda` for GPU offload): it builds the vendored llama.cpp as shared libraries into `vendor/llama.cpp/build-windows` and generates the `lib*.dll.a` import libraries FreeBASIC needs, beside the DLLs in the build's `bin/Release` folder. Compile an example from `examples/` with the Windows fbc, pointing `-p` at that folder, e.g. `fbc hello_llama.bas -p ..\vendor\llama.cpp\build-windows\bin\Release -l llama -l ggml -l ggml-base -l ggml-cpu`, and copy the DLLs next to the resulting `.exe` (or add the folder to `PATH`) before running it. *This route follows the fork's documented Windows build; the script is new and has not yet been tested end to end on Windows.*
+**Windows:** The build/run scripts are POSIX shell and do not run on Windows. From a Developer PowerShell at the repo root, run `tools/build-windows.ps1` (add `-Cuda` for GPU offload): it builds the vendored llama.cpp as shared libraries into `vendor/llama.cpp/build-windows` and generates the `lib*.dll.a` import libraries FreeBASIC needs, beside the DLLs in the build's `bin/Release` folder.
+
+Every example also has PowerShell build and run launchers in `examples/`, named after its `.sh` scripts. From `examples/`, run `.\build_animal_tank.ps1` and then `.\run_animal_tank.ps1`; the run script finds the DLL folder, puts it on `PATH`, builds the `.exe` if it is missing, and forwards extra arguments. Both scripts accept a llama.cpp checkout and a DLL folder as their first two arguments, or `LLAMA_CPP_DIR` / `LLAMA_BUILD_DIR`. `grammar_forge`, `persistent_companion`, and `text_adventure` also build their `fbejson` static libraries into `vendor/fbejson/build-windows`. `hello_llama` has a build script only, as on Unix.
+
+You can still compile directly with the Windows fbc: `fbc hello_llama.bas -p ..\vendor\llama.cpp\build-windows\bin\Release -l llama -l ggml -l ggml-base -l ggml-cpu`. Copy the DLLs next to the `.exe`, or add that folder to `PATH`, before running it. *This route follows the fork's documented Windows build; the Windows scripts are new and have not yet been tested end to end on Windows, and their syntax has been checked by hand only.*
 
 ## Layout
 
