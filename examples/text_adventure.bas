@@ -1476,7 +1476,10 @@ if logging = 1 then
 end if
 
 ' intro
-ui_log "Locked In at Fumble Labs"
+ui_log "You just ended another long day of work at Fumble Labs."
+ui_log "It seems you are the last one at work today and they forgot you were here."
+ui_log "The building security has been activated and you can't get out, you need to get home to your cat."
+ui_log "---------------"
 ui_log roomDesc(0)
 file_log "=== SESSION START ==="
 
